@@ -1,7 +1,10 @@
 import std/options
+import std/strformat
 import std/tables
+import ../../lib/syslog
 
 type HciStatus* {.pure.} = enum
+  BLE_HCI_SUCCESS = 0
   BLE_HCI_ERROR_UNKNOWN_COMMAND = 1
   BLE_HCI_ERROR_NO_CONNECTION = 2
   BLE_HCI_ERROR_HARDWARE_FAILURE = 3
@@ -161,9 +164,25 @@ proc strHciStatus*(s: HciStatus|int): string =
   else:
     result = &"Undefined Error: Code 0x{s.int:02x}"
 
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc checkHciStatus*(code: int, procName: string): bool =
+  let hciStatus_opt = code.decodeHciStatus()
+  if hciStatus_opt.isNone:
+    let errmsg = &"! {procName}: Unknown HciStatus, 0x{code:02x}."
+    syslog.error(errmsg)
+    return
+  let hciStatus = hciStatus_opt.get()
+  if hciStatus == HciStatus.BLE_HCI_SUCCESS:
+    result = true
+  else:
+    let errStr = hciStatus.strHciStatus()
+    let errmsg = &"! {procName}: failed with status: 0x{code:02x} ({errStr})"
+    syslog.error(errmsg)
+
 
 when isMainModule:
-  import std/strformat
   for errcode in HciStatus.low.int .. HciStatus.high.int + 1:
     let errStr = strHciStatus(errcode)
     echo &"  0x{errcode:02x}: \"{errStr}\","
