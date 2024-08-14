@@ -8,7 +8,9 @@ import ../lib/asyncsync
 import ../lib/syslog
 import ./btm
 import ./basic/types
-import ./opc
+import ./core/hci_status
+import ./core/opc
+import ./util
 
 type
   GattId = distinct uint16
@@ -152,6 +154,32 @@ proc btmSendRecv*(self: BleClient, payload: string): Future[Option[string]] {.as
   let res = await self.mainRespQueue.get()
   if res.len > 0:
     result = some(res)
+
+# ------------------------------------------------------------------------------
+# API: Send Command
+# ------------------------------------------------------------------------------
+proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char]): Future[Option[string]] {.async.} =
+  let payload = buf.toString(buf.len)
+  result = await self.btmSendRecv(payload)
+
+# ------------------------------------------------------------------------------
+# API: Send Request/Receive, Check Response
+# ------------------------------------------------------------------------------
+proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc: uint16):
+    Future[bool] {.async.} =
+  let res_opt = await self.btmSendRecv(payload)
+  if res_opt.isNone:
+    let errmsg = &"! {procName}: failed"
+    syslog.error(errmsg)
+    return
+  let response = res_opt.get()
+  let resOpc = response.getOpc(0)
+  if resOpc != expectedOpc:
+    let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
+    syslog.error(errmsg)
+    return
+  let hciCode = payload[2].int
+  result = hciCode.checkHciStatus(procName)
 
 
 when isMainModule:
