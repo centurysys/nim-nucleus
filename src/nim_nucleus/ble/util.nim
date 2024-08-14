@@ -3,6 +3,13 @@ import std/nativesockets
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc toString*(buf: openArray[uint8|char]): string =
+  result = newString(buf.len)
+  copyMem(addr result[0], addr buf[0], buf.len)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 func hb(x: uint16): uint8 {.inline.} =
   result = ((x shr 8) and 0xff).uint8
 
@@ -27,33 +34,33 @@ func be_lb(x: uint16): uint8 {.inline.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc setOpc*(buf: var openArray[uint8], pos: int, opc: uint16) {.inline.} =
+proc setOpc*(buf: var openArray[uint8|char], pos: int, opc: uint16) {.inline.} =
   buf[pos] = opc.be_hb
   buf[pos + 1] = opc.be_lb
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getOpc*(buf: openArray[uint8], pos: int): uint16 {.inline.} =
+proc getOpc*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
   result = (buf[0].uint16 shl 8) or buf[1].uint16
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc setLe16*(buf: var openArray[uint8], pos: int, val: uint16) {.inline.} =
+proc setLe16*(buf: var openArray[uint8|char], pos: int, val: uint16) {.inline.} =
   buf[pos] = val.lb
   buf[pos + 1] = val.hb
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getLe16*(buf: openArray[uint8], pos: int): uint16 {.inline.} =
+proc getLe16*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
   result = (buf[1].uint16 shl 8) or buf[0].uint16
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc setBdAddr*(buf: var openArray[uint8], pos: int, bdAddr: uint64) =
+proc setBdAddr*(buf: var openArray[uint8|char], pos: int, bdAddr: uint64) =
   for idx in 0 ..< 6:
     let octet = ((bdAddr shr (idx * 8)) and 0xff).uint8
     buf[idx] = octet
@@ -61,21 +68,21 @@ proc setBdAddr*(buf: var openArray[uint8], pos: int, bdAddr: uint64) =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getBdAddr*(buf: openArray[uint8], pos: int): uint64 =
+proc getBdAddr*(buf: openArray[uint8|char]|string, pos: int): uint64 =
   for idx in 0 ..< 6:
     result = result or (buf[idx] shl (idx * 8))
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc setLeArray*(buf: var openArray[uint8], pos: int, val: openArray[uint8], len: int) =
+proc setLeArray*(buf: var openArray[uint8|char], pos: int, val: openArray[uint8], len: int) =
   for idx in 0 ..< len:
     buf[pos + idx] = val[idx]
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getLeArray*(buf: var openArray[uint8], pos: int, len: int): seq[uint8] =
+proc getLeArray*(buf: openArray[uint8|char]|string, pos: int, len: int): seq[uint8] =
   result = newSeqOfCap[uint8](len)
   for idx in 0 ..< len:
     result.add(buf[pos + idx])
