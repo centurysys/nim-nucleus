@@ -60,6 +60,12 @@ proc getLe16*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc getLeInt16*(buf: openArray[uint8|char]|string, pos: int): int16 {.inline.} =
+  result = cast[int16](getLe16(buf, pos))
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc setBdAddr*(buf: var openArray[uint8|char], pos: int, bdAddr: uint64) =
   for idx in 0 ..< 6:
     let octet = ((bdAddr shr (idx * 8)) and 0xff).uint8
