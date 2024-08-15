@@ -41,7 +41,7 @@ proc setOpc*(buf: var openArray[uint8|char], pos: int, opc: uint16) {.inline.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getOpc*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
+proc getOpc*(buf: openArray[uint8|char]|string, pos: int = 0): uint16 {.inline.} =
   result = (buf[0].uint16 shl 8) or buf[1].uint16
 
 # ------------------------------------------------------------------------------
@@ -70,7 +70,7 @@ proc setBdAddr*(buf: var openArray[uint8|char], pos: int, bdAddr: uint64) =
 # ------------------------------------------------------------------------------
 proc getBdAddr*(buf: openArray[uint8|char]|string, pos: int): uint64 =
   for idx in 0 ..< 6:
-    result = result or (buf[idx] shl (idx * 8))
+    result = result or (buf[idx].uint64 shl (idx * 8))
 
 # ------------------------------------------------------------------------------
 #
