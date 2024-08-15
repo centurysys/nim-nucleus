@@ -46,9 +46,6 @@ const
 
 var ev: EventObj
 
-func getOpc(s: string): uint16 =
-  result = (s[0].uint16.shl 8) or s[1].uint16
-
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
@@ -75,7 +72,7 @@ proc responseHandler(self: BleClient) {.async.} =
     await self.event.ev.wait()
     while self.event.deque.len > 0:
       let event = self.event.deque.popFirst()
-      if event.len == 0:
+      if event.len < 3:
         continue
       let opc = event.getOpc()
       echo &"* OPC: {opc:04X}"
@@ -180,6 +177,16 @@ proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc
     return
   let hciCode = payload[2].int
   result = hciCode.checkHciStatus(procName)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc checkPayloadLen*(procName: string, payload: string, length: int): bool =
+  if payload.len != length:
+    let errmsg = &"! {procName}: payload length error, {payload.len} [bytes]"
+    syslog.error(errmsg)
+  else:
+    result = true
 
 
 when isMainModule:
