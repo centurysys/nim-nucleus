@@ -3,7 +3,7 @@ export types
 
 type
   RemoteCollectionKey* = object
-    addrType*: PeerAddrType
+    addrType*: AddrType
     peerAddr*: uint64
     auth*: Authentication
     encKeySize*: uint8

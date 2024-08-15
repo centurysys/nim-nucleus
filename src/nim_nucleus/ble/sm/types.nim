@@ -28,9 +28,33 @@ type
     Completed = (0x01, "Authorization completed")
 
 type
+  PeerAddr* = object
+    addrType*: AddrType
+    address*: uint64
+  LocalAddr* = object
+    addrType*: AddrType
+    address*: uint64
   LocalSecurity* = object
-    peerAddrType*: PeerAddrType
-    peerAddr*: uint64
+    peer*: PeerAddr
     auth*: Authentication
     encKeySize*: uint8
     authorized*: bool
+  PeerLtk* = object
+    peer*: PeerAddr
+    ltk*: array[16, uint8]
+  PeerEdivRand* = object
+    peer*: PeerAddr
+    ediv*: uint16
+    rand*: array[8, uint8]
+  PeerIrk* = object
+    peer*: PeerAddr
+    irk*: array[16, uint8]
+  PeerAddressInfo* = object
+    peer*: PeerAddr
+    peerId*: PeerAddr
+  PeerCsrk* = object
+    peer*: PeerAddr
+    csrk*: array[16, uint8]
+  LocalIrk* = object
+    peer*: PeerAddr
+    irk*: array[16, uint8]

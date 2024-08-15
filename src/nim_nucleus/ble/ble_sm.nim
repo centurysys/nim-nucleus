@@ -1,9 +1,12 @@
 import std/asyncdispatch
+import std/options
+import std/strformat
 import ./ble_client
 import ./core/opc
 import ./sm/types
 import ./sm/requests
 import ./util
+import ../lib/syslog
 export types
 
 # ------------------------------------------------------------------------------
@@ -91,9 +94,211 @@ proc deleteRemoteDeviceKeyReq*(self: BleClient, device: RemoteDevice):
 # Event Parsers
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# 1.3.18 LE ローカルセキュリティ 設定通知
+# ------------------------------------------------------------------------------
+proc parseLocalSecurityPropertyEvent*(self: BleClient, payload: string):
+    Option[LocalSecurity] =
+  const procName = "parseLocalSecurityPropertyEvent"
+  if not checkPayloadLen(procName, payload, 12):
+    return
+  try:
+    var res: LocalSecurity
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = getBdAddr(payload, 3)
+    res.auth = payload[9].Authentication
+    res.encKeySize = payload[10].uint8
+    res.authorized = if payload[11].Authorization == Authorization.Completed: true
+        else: false
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.19 LE LTK 受信通知
+# ------------------------------------------------------------------------------
+proc parseLtkReceiveEvent*(self: BleClient, payload: string): Option[PeerLtk] =
+  const procName = "parseLtkReceiveEvent"
+  if not checkPayloadLen(procName, payload, 25):
+    return
+  try:
+    var res: PeerLtk
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    payload.getLeArray(res.ltk, 9, 16)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.20 LE EDIV Rand 受信通知
+# ------------------------------------------------------------------------------
+proc parseEdivRandReceiveEvent*(self: BleClient, payload: string): Option[PeerEdivRand] =
+  const procName = "parseEdivRandReceiveEvent"
+  if not checkPayloadLen(procName, payload, 19):
+    return
+  try:
+    var res: PeerEdivRand
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    res.ediv = payload.getLe16(9)
+    payload.getLeArray(res.rand, 11, 8)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.22 LE Address Information 受信通知
+# ------------------------------------------------------------------------------
+proc parseAddressInfoReceiveEvent*(self: BleClient, payload: string): Option[PeerAddressInfo] =
+  const procName = "parseAddressInfoReceiveEvent"
+  if not checkPayloadLen(procName, payload, 16):
+    return
+  try:
+    var res: PeerAddressInfo
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    res.peerId.addrType = payload[9].AddrType
+    res.peerId.address = payload.getBdAddr(10)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.23 LE CSRK 受信通知
+# ------------------------------------------------------------------------------
+proc parseCsrkReceiveEvent*(self: BleClient, payload: string): Option[PeerCsrk] =
+  const procName = "parseCsrkReceiveEvent"
+  if not checkPayloadLen(procName, payload, 25):
+    return
+  try:
+    var res: PeerCsrk
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    payload.getLeArray(res.csrk, 9, 16)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.24 LE LTK 送信通知
+# ------------------------------------------------------------------------------
+proc parseLtkSendEvent*(self: BleClient, payload: string): Option[PeerLtk] =
+  const procName = "parseLtkSendEvent"
+  if not checkPayloadLen(procName, payload, 25):
+    return
+  try:
+    var res: PeerLtk
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    payload.getLeArray(res.ltk, 9, 16)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.25 LE EDIV Rand 送信通知
+# ------------------------------------------------------------------------------
+proc parseEdivRandSendEvent*(self: BleClient, payload: string): Option[PeerEdivRand] =
+  const procName = "parseEdivRandSendEvent"
+  if not checkPayloadLen(procName, payload, 19):
+    return
+  try:
+    var res: PeerEdivRand
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    res.ediv = payload.getLe16(9)
+    payload.getLeArray(res.rand, 11, 8)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.26 LE IRK 送信通知
+# ------------------------------------------------------------------------------
+proc parseIrkSendEvent*(self: BleClient, payload: string): Option[LocalIrk] =
+  const procName = "parseIrkSendEvent"
+  if not checkPayloadLen(procName, payload, 25):
+    return
+  try:
+    var res: LocalIrk
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    payload.getLeArray(res.irk, 9, 16)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.27 LE Address Information 送信通知
+# ------------------------------------------------------------------------------
+proc parseAddressInfoSendEvent*(self: BleClient, payload: string): Option[LocalAddr] =
+  const procName = "parseAddressInfoSendEvent"
+  if not checkPayloadLen(procName, payload, 9):
+    return
+  try:
+    var res: LocalAddr
+    res.addrType = payload[2].AddrType
+    res.address = payload.getBdAddr(3)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.28 LE CSRK 送信通知
+# ------------------------------------------------------------------------------
+proc parseCsrkSendEvent*(self: BleClient, payload: string): Option[PeerCsrk] =
+  const procName = "parseCsrkSendEvent"
+  if not checkPayloadLen(procName, payload, 25):
+    return
+  try:
+    var res: PeerCsrk
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    payload.getLeArray(res.csrk, 9, 16)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.29 LE 認証完了通知
+# ------------------------------------------------------------------------------
+proc parseAuthenticationCompleteEvent*(self: BleClient, payload: string): Option[PeerAddr] =
+  const procName = "parseAuthenticationCompleteEvent"
+  if not checkPayloadLen(procName, payload, 9):
+    return
+  try:
+    var res: PeerAddr
+    res.addrType = payload[2].AddrType
+    res.address = payload.getBdAddr(3)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
 
 when isMainmodule:
-  import std/strformat
   import std/strutils
 
   var cmd: array[3, uint8]
