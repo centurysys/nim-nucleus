@@ -107,7 +107,7 @@ proc parseGattCommonConnectEvent*(self: BleClient, payload: string): Option[Gatt
     res.gattResult = payload.getLe16(2)
     res.gattId = payload.getLe16(4)
     res.attMtu = payload.getLe16(6)
-    res.peerAddrType = payload[8].DirectAddrType
+    res.peerAddrType = payload[8].AddrType
     res.peerAddr = payload.getBdAddr(9)
     res.controlRole = payload[15].Role
   except:

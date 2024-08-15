@@ -5,8 +5,8 @@ type
   # GATT 接続指示
   GattConnParams* = object
     filterPolicy*: bool
-    ownAddrType*: DirectAddrType
+    ownAddrType*: AddrType
     randomAddrType*: RandomAddrType
-    peerAddrType*: DirectAddrType
+    peerAddrType*: AddrType
     peerAddr*: uint64
     phys*: Table[PhyKind, ConnParams]

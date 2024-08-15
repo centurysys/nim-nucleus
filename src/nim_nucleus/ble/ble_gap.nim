@@ -46,8 +46,8 @@ proc setScanEnableReq*(self: BleClient, scanEnable: bool, filterDuplicates: bool
   var buf: array[4, uint8]
   buf.setOpc(0, reqOpc)
   buf[2] = (if scanEnable: Scan.Enable else: Scan.Disable).uint8
-  buf[3] = (if filterDuplicates: DuplicacaFilter.Enable
-      else: DuplicacaFilter.Disable).uint8
+  buf[3] = (if filterDuplicates: DuplicateFilter.Enable
+      else: DuplicateFilter.Disable).uint8
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
 # ==============================================================================
@@ -64,7 +64,7 @@ proc parseAdvertisingReport*(self: BleClient, payload: string): Option[Advertisi
   try:
     var res: AdvertisingReport
     res.eventType = payload[2].EventType
-    res.addrType = payload[3].DirectAddrType
+    res.addrType = payload[3].AddrType
     res.bdAddr = payload.getBdAddr(4)
     let dataLen = payload[10].uint8
     res.data = newString(dataLen)
@@ -89,7 +89,7 @@ proc parseEnhConnectionComplete*(self: BleClient, payload: string):
     res.hciStatus = payload[2].HciStatus
     res.conHandle = payload.getLe16(3)
     res.role = payload[5].Role
-    res.peerAddrType = payload[6].DirectAddrType
+    res.peerAddrType = payload[6].AddrType
     res.peerAddr = payload.getBdAddr(7)
     res.localPrivateAddr = payload.getBdAddr(13)
     res.remotePrivateAddr = payload.getBdAddr(19)

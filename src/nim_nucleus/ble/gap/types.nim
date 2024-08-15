@@ -1,5 +1,7 @@
 import std/options
 import ../core/hci_status
+import ../common/common_types
+export common_types
 
 type
   # Set Advertising Parameter Request (0x4000)
@@ -9,7 +11,7 @@ type
     SCAN_IND = 0x02'u8
     NONCONN_IND = 0x03'u8
     DIRECT_IND_LOW = 0x04'u8
-  AddrType* {.pure.} = enum
+  AddrTypeEx* {.pure.} = enum
     Public = 0x00'u8
     RandomNonResolvPrivate = 0x01'u8
     RandomResolvPrivate = 0x41'u8
@@ -18,10 +20,7 @@ type
     NonResolvPrivate = 0x00'u8
     ResolvPrivate = 0x40'u8
     Static = 0xc0'u8
-  DirectAddrType* {.pure.} = enum
-    Public = 0x00'u8
-    Random = 0x01'u8
-  Channel* = enum
+  BleChannel* = enum
     ch37 = 0x01'u8
     ch38 = 0x02'u8
     ch39 = 0x04'u8
@@ -46,7 +45,7 @@ type
   Scan* {.pure.} = enum
     Disable = 0x00'u8
     Enable = 0x01'u8
-  DuplicacaFilter* {.pure.} = enum
+  DuplicateFilter* {.pure.} = enum
     Disable = 0x00'u8
     Enable = 0x01'u8
 
@@ -75,7 +74,7 @@ type
   # LE Advertising Report (0x4017)
   AdvertisingReport* = object
     eventType*: EventType
-    addrType*: DirectAddrType
+    addrType*: AddrType
     bdAddr*: uint64
     name*: Option[string]
     data*: string
@@ -85,7 +84,7 @@ type
     hciStatus*: HciStatus
     conHandle*: uint16
     role*: Role
-    peerAddrType*: DirectAddrType
+    peerAddrType*: AddrType
     peerAddr*: uint64
     localPrivateAddr*: uint64
     remotePrivateAddr*: uint64

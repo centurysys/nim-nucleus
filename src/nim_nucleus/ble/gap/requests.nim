@@ -7,16 +7,16 @@ type
     advIntervalMax*: uint16
     case advType*: AdvType
     of AdvType.DIRECT_IND, AdvType.DIRECT_IND_LOW:
-      directAddrType*: DirectAddrType
+      directAddrType*: AddrType
       directAddr*: array[6, uint8]
     else:
       discard
-    case ownAddrType*: AddrType
-    of AddrType.Public:
+    case ownAddrType*: AddrTypeEx
+    of AddrTypeEx.Public:
       discard
     else:
       randomAddrType*: RandomAddrType
-    adcChannelMap*: Channel
+    adcChannelMap*: BleChannel
     advFilterPolicy*: AdvFilterPolicy
 
   # Set Scan Paramter Request (0x4005)
@@ -24,8 +24,8 @@ type
     scanType*: ScanType
     scanInterval*: uint16
     scanWindow*: uint16
-    case ownAddrType*: AddrType
-    of AddrType.Public:
+    case ownAddrType*: AddrTypeEx
+    of AddrTypeEx.Public:
       discard
     else:
       randomAddrType*: RandomAddrType

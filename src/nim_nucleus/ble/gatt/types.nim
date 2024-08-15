@@ -1,5 +1,6 @@
+import ../common/common_types
 import ../gap/types
-export types
+export common_types, types
 
 type
   PhyKind* = enum
@@ -23,7 +24,7 @@ type
     gattResult*: uint16
     gattId*: uint16
     attMtu*: uint16
-    peerAddrType*: DirectAddrType
+    peerAddrType*: AddrType
     peerAddr*: uint64
     controlRole*: Role
   # 1.4.7 GATT 切断通知
