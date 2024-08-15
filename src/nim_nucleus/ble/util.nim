@@ -92,3 +92,11 @@ proc getLeArray*(buf: openArray[uint8|char]|string, pos: int, len: int): seq[uin
   result = newSeqOfCap[uint8](len)
   for idx in 0 ..< len:
     result.add(buf[pos + idx].uint8)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc getLeArray*(src: openArray[uint8|char]|string, dest: var openArray[uint8],
+    pos: int, len: int) =
+  for idx in 0 ..< len:
+    dest[idx] = src[pos + idx].uint8
