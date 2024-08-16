@@ -3,6 +3,7 @@ import std/options
 import std/strformat
 import ./ble_client
 import ./core/opc
+import ./core/sm_reason
 import ./sm/types
 import ./sm/requests
 import ./util
@@ -291,6 +292,24 @@ proc parseAuthenticationCompleteEvent*(self: BleClient, payload: string): Option
     var res: PeerAddr
     res.addrType = payload[2].AddrType
     res.address = payload.getBdAddr(3)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.3.34 LE 認証失敗通知
+# ------------------------------------------------------------------------------
+proc parseAuthenticationFailEvent*(self: BleClient, payload: string): Option[AuthFailInfo] =
+  const procName = "parseAuthenticationFailEvent"
+  if not checkPayloadLen(procName, payload, 10):
+    return
+  try:
+    var res: AuthFailInfo
+    res.peer.addrType = payload[2].AddrType
+    res.peer.address = payload.getBdAddr(3)
+    res.smReason = payload[9].SmReason
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()

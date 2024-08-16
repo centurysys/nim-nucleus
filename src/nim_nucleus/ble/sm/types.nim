@@ -1,4 +1,5 @@
 import ../common/common_types
+import ../core/sm_reason
 import ../gap/types
 export common_types, types
 
@@ -58,3 +59,9 @@ type
   LocalIrk* = object
     peer*: PeerAddr
     irk*: array[16, uint8]
+
+type
+  # 1.3.34 LE 認証失敗通知 (0x407b)
+  AuthFailInfo* = object
+    peer*: PeerAddr
+    smReason*: SmReason
