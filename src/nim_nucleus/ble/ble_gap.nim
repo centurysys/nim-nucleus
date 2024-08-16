@@ -51,6 +51,25 @@ proc setScanEnableReq*(self: BleClient, scanEnable: bool, filterDuplicates: bool
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
 # ==============================================================================
+# Instructs
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1.2.17 LE Disconnect 指示
+# ------------------------------------------------------------------------------
+proc disconnectIns*(self: BleClient, conHandle: uint16, reason: HciStatus):
+    Future[bool] {.async.} =
+  const
+    procName = "setScanParametersReq"
+    reqOpc = BTM_D_OPC_BLE_GAP_DISCONNECT_INS
+    expOpc = BTM_D_OPC_BLE_GAP_DISCONNECT_CFM
+  var buf: array[5, uint8]
+  buf.setOpc(0, reqOpc)
+  buf.setLe16(2, conHandle)
+  buf[4] = reason.uint8
+  result = await self.btmRequest(procName, buf.toString, expOpc)
+
+# ==============================================================================
 # Event Parsers
 # ==============================================================================
 
@@ -70,6 +89,25 @@ proc parseAdvertisingReport*(self: BleClient, payload: string): Option[Advertisi
     res.data = newString(dataLen)
     copyMem(addr res.data[0], addr payload[11], dataLen)
     res.rssi = payload[42].int8
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.2.19 LE Disconnection Compete 通知
+# ------------------------------------------------------------------------------
+proc parseDisconnectionComplete*(self: BleClient, payload: string):
+    Option[DisconnectionCompleteEvent] =
+  const procName = "parseDisconnectionComplete"
+  if not checkPayloadLen(procName, payload, 6):
+    return
+  try:
+    var res: DisconnectionCompleteEvent
+    res.hciStatus = payload[2].HciStatus
+    res.conHandle = payload.getLe16(3)
+    res.reason = payload[5].HciStatus
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()

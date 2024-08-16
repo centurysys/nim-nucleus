@@ -71,7 +71,7 @@ type
   ChannSelAlgorithm* {.pure.} = enum
     alg0 = (0x00'u8, "LE Channel Selection Algorithm #1")
     alg1 = (0x01'u8, "LE Channel Selection Algorithm #2")
-  # LE Advertising Report (0x4017)
+  # 1.2.15 LE Advertising Report (0x4017)
   AdvertisingReport* = object
     eventType*: EventType
     addrType*: AddrType
@@ -79,7 +79,12 @@ type
     name*: Option[string]
     data*: string
     rssi*: int8
-  # LE Enhanced Connection Complete 通知 (0x419f)
+  # 1.2.19 LE Disconnection COmplete 通知 (0x401b)
+  DisconnectionCompleteEvent* = object
+    hciStatus*: HciStatus
+    conHandle*: uint16
+    reason*: HciStatus
+  # 1.2.71 LE Enhanced Connection Complete 通知 (0x419f)
   EnhConnectionCompleteEvent* = object
     hciStatus*: HciStatus
     conHandle*: uint16
@@ -92,7 +97,7 @@ type
     conLatency*: uint16
     supervisionTImeout*: uint16
     masterClockAccuracy*: ClockAccuracy
-  # LE Enhanced Connection Complete 通知 (0x419f)
+  # L1.2.78 E Channel Selection Algorithm 通知 (0x41be)
   ChannelSelAlgorithmReport* = object
     conHandle*: uint16
     alg*: ChannSelAlgorithm
