@@ -39,14 +39,14 @@ proc setSecurityModeReq*(self: BleClient, mode: SecurityMode): Future[bool]
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
 # ------------------------------------------------------------------------------
-# 1.3.5 LE ローカルデバイス Key 設定要求
+# 1.3.5 LE ローカルデバイス Key 設定要求 (未使用)
 # ------------------------------------------------------------------------------
 proc setLocalDeviceKeyReq*(self: BleClient, irk: array[16, uint8],
     dhk: array[32, uint8]): Future[bool] {.async.} =
   const
     procName = "setLocalDeviceKeyReq"
-    reqOpc = BTM_D_OPC_BLE_SM_SECURITY_MODE_SET_REQ
-    expOpc = BTM_D_OPC_BLE_SM_SECURITY_MODE_SET_RSP
+    reqOpc = BTM_D_OPC_BLE_SM_LOCAL_DEVICE_KEY_SET_REQ
+    expOpc = BTM_D_OPC_BLE_SM_LOCAL_DEVICE_KEY_SET_RSP
   var buf: array[50, uint8]
   buf.setOpc(0, reqOpc)
   buf.setLeArray(2, irk, 16)
@@ -105,11 +105,11 @@ proc parseLocalSecurityPropertyEvent*(self: BleClient, payload: string):
     return
   try:
     var res: LocalSecurity
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = getBdAddr(payload, 3)
-    res.auth = payload[9].Authentication
-    res.encKeySize = payload[10].uint8
-    res.authorized = if payload[11].Authorization == Authorization.Completed: true
+    res.auth = payload.getU8(9).Authentication
+    res.encKeySize = payload.getU8(10)
+    res.authorized = if payload.getU8(11).Authorization == Authorization.Completed: true
         else: false
     result = some(res)
   except:
@@ -126,7 +126,7 @@ proc parseLtkReceiveEvent*(self: BleClient, payload: string): Option[PeerLtk] =
     return
   try:
     var res: PeerLtk
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     payload.getLeArray(res.ltk, 9, 16)
     result = some(res)
@@ -144,7 +144,7 @@ proc parseEdivRandReceiveEvent*(self: BleClient, payload: string): Option[PeerEd
     return
   try:
     var res: PeerEdivRand
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     res.ediv = payload.getLe16(9)
     payload.getLeArray(res.rand, 11, 8)
@@ -163,9 +163,9 @@ proc parseAddressInfoReceiveEvent*(self: BleClient, payload: string): Option[Pee
     return
   try:
     var res: PeerAddressInfo
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
-    res.peerId.addrType = payload[9].AddrType
+    res.peerId.addrType = payload.getU8(9).AddrType
     res.peerId.address = payload.getBdAddr(10)
     result = some(res)
   except:
@@ -182,7 +182,7 @@ proc parseCsrkReceiveEvent*(self: BleClient, payload: string): Option[PeerCsrk] 
     return
   try:
     var res: PeerCsrk
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     payload.getLeArray(res.csrk, 9, 16)
     result = some(res)
@@ -200,7 +200,7 @@ proc parseLtkSendEvent*(self: BleClient, payload: string): Option[PeerLtk] =
     return
   try:
     var res: PeerLtk
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     payload.getLeArray(res.ltk, 9, 16)
     result = some(res)
@@ -218,7 +218,7 @@ proc parseEdivRandSendEvent*(self: BleClient, payload: string): Option[PeerEdivR
     return
   try:
     var res: PeerEdivRand
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     res.ediv = payload.getLe16(9)
     payload.getLeArray(res.rand, 11, 8)
@@ -237,7 +237,7 @@ proc parseIrkSendEvent*(self: BleClient, payload: string): Option[LocalIrk] =
     return
   try:
     var res: LocalIrk
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     payload.getLeArray(res.irk, 9, 16)
     result = some(res)
@@ -255,7 +255,7 @@ proc parseAddressInfoSendEvent*(self: BleClient, payload: string): Option[LocalA
     return
   try:
     var res: LocalAddr
-    res.addrType = payload[2].AddrType
+    res.addrType = payload.getU8(2).AddrType
     res.address = payload.getBdAddr(3)
     result = some(res)
   except:
@@ -272,7 +272,7 @@ proc parseCsrkSendEvent*(self: BleClient, payload: string): Option[PeerCsrk] =
     return
   try:
     var res: PeerCsrk
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
     payload.getLeArray(res.csrk, 9, 16)
     result = some(res)
@@ -290,7 +290,7 @@ proc parseAuthenticationCompleteEvent*(self: BleClient, payload: string): Option
     return
   try:
     var res: PeerAddr
-    res.addrType = payload[2].AddrType
+    res.addrType = payload.getU8(2).AddrType
     res.address = payload.getBdAddr(3)
     result = some(res)
   except:
@@ -307,9 +307,9 @@ proc parseAuthenticationFailEvent*(self: BleClient, payload: string): Option[Aut
     return
   try:
     var res: AuthFailInfo
-    res.peer.addrType = payload[2].AddrType
+    res.peer.addrType = payload.getU8(2).AddrType
     res.peer.address = payload.getBdAddr(3)
-    res.smReason = payload[9].SmReason
+    res.smReason = payload.getU8(9).SmReason
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
