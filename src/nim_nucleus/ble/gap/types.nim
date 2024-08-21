@@ -79,11 +79,23 @@ type
     name*: Option[string]
     data*: string
     rssi*: int8
-  # 1.2.19 LE Disconnection COmplete 通知 (0x401b)
+  # 1.2.19 LE Disconnection Complete 通知 (0x401b)
   DisconnectionCompleteEvent* = object
     hciStatus*: HciStatus
     conHandle*: uint16
     reason*: HciStatus
+  # 1.2.30 LE Connection Update 通知 (0x4032)
+  ConnectionUpdateEvent* = object
+    hciStatus*: HciStatus
+    conHandle*: uint16
+    conInterval*: uint16
+    conLatency*: uint16
+    supervisionTImeout*: uint16
+  # 1.2.36 LE Encryption Change 通知 (0x4037)
+  EncryptionChangeEvent* = object
+    hciStatus*: HciStatus
+    conHandle*: uint16
+    encryptionEnabled*: bool
   # 1.2.71 LE Enhanced Connection Complete 通知 (0x419f)
   EnhConnectionCompleteEvent* = object
     hciStatus*: HciStatus
