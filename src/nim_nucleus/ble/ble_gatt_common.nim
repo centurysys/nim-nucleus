@@ -98,7 +98,7 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[in
 # ------------------------------------------------------------------------------
 # 1.4.4 GATT 接続通知
 # ------------------------------------------------------------------------------
-proc parseGattCommonConnectEvent*(self: BleClient, payload: string): Option[GattConEvent] =
+proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
   const procName = "parseGattCommonConnectEvent"
   if not checkPayloadLen(procName, payload, 16):
     return
@@ -107,9 +107,9 @@ proc parseGattCommonConnectEvent*(self: BleClient, payload: string): Option[Gatt
     res.gattResult = payload.getLe16(2)
     res.gattId = payload.getLe16(4)
     res.attMtu = payload.getLe16(6)
-    res.peerAddrType = payload[8].AddrType
+    res.peerAddrType = payload.getU8(8).AddrType
     res.peerAddr = payload.getBdAddr(9)
-    res.controlRole = payload[15].Role
+    res.controlRole = payload.getU8(15).Role
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
@@ -118,7 +118,7 @@ proc parseGattCommonConnectEvent*(self: BleClient, payload: string): Option[Gatt
 # ------------------------------------------------------------------------------
 # 1.4.7 GATT 切断通知
 # ------------------------------------------------------------------------------
-proc parseGattCommonDisconnectEvent*(self: BleClient, payload: string): Option[GattDisconEvent] =
+proc parseGattCommonDisconnectEvent*(payload: string): Option[GattDisconEvent] =
   const procName = "parseGattCommonDisconnectEvent"
   if not checkPayloadLen(procName, payload, 6):
     return

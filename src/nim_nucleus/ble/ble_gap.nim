@@ -76,7 +76,7 @@ proc disconnectIns*(self: BleClient, conHandle: uint16, reason: HciStatus):
 # ------------------------------------------------------------------------------
 # 1.2.15 LE Advertising Report 通知
 # ------------------------------------------------------------------------------
-proc parseAdvertisingReport*(self: BleClient, payload: string): Option[AdvertisingReport] =
+proc parseAdvertisingReport*(payload: string): Option[AdvertisingReport] =
   const procName = "parseAdertisingReport"
   if not checkPayloadLen(procName, payload, 43):
     return
@@ -101,8 +101,7 @@ proc parseAdvertisingReport*(self: BleClient, payload: string): Option[Advertisi
 # ------------------------------------------------------------------------------
 # 1.2.19 LE Disconnection Compete 通知
 # ------------------------------------------------------------------------------
-proc parseDisconnectionComplete*(self: BleClient, payload: string):
-    Option[DisconnectionCompleteEvent] =
+proc parseDisconnectionComplete*(payload: string): Option[DisconnectionCompleteEvent] =
   const procName = "parseDisconnectionComplete"
   if not checkPayloadLen(procName, payload, 6):
     return
@@ -120,8 +119,7 @@ proc parseDisconnectionComplete*(self: BleClient, payload: string):
 # ------------------------------------------------------------------------------
 # 1.2.71 LE Enhanced Connection Complete 通知
 # ------------------------------------------------------------------------------
-proc parseEnhConnectionComplete*(self: BleClient, payload: string):
-    Option[EnhConnectionCompleteEvent] =
+proc parseEnhConnectionComplete*(payload: string): Option[EnhConnectionCompleteEvent] =
   const procName = "parseEnhConnectionComplete"
   if not checkPayloadLen(procName, payload, 32):
     return
@@ -147,8 +145,7 @@ proc parseEnhConnectionComplete*(self: BleClient, payload: string):
 # ------------------------------------------------------------------------------
 # 1.2.78 LE Channel Selection Algorithm 通知
 # ------------------------------------------------------------------------------
-proc parseChannelSelAlgorithm*(self: BleClient, payload: string):
-    Option[ChannelSelAlgorithmReport] =
+proc parseChannelSelAlgorithm*(payload: string): Option[ChannelSelAlgorithmReport] =
   const procName = "parseChannelSelAlgorithm"
   if not checkPayloadLen(procName, payload, 5):
     return
