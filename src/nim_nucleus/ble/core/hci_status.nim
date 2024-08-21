@@ -70,6 +70,7 @@ type HciStatus* {.pure.} = enum
   BLE_HCI_ERROR_UNKNOWN_ADVERTISING_ID = 66'u8
   BLE_HCI_ERROR_LIMIT_REACHED = 67'u8
   BLE_HCI_ERROR_CANCELLED_BY_HOST = 68'u8
+  BLE_HCI_ERROR_UNDEFINED = 0xff'u8
 
 const tblHciStatus = {
   0x00: "Success",
@@ -146,8 +147,20 @@ const tblHciStatus = {
 proc decodeHciStatus*(code: int|uint|uint8): Option[HciStatus] =
   let errStr = tblHciStatus.getOrDefault(code.int)
   if errStr.len > 0:
+    {.warning[HoleEnumConv]:off.}
     let status = HciStatus(code.int)
     result = some(status)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc toHciStatus*(code: int|uint|uint8): HciStatus =
+  let errStr = tblHciStatus.getOrDefault(code.int)
+  if errStr.len > 0:
+    {.warning[HoleEnumConv]:off.}
+    result = HciStatus(code.int)
+  else:
+    result = HciStatus.BLE_HCI_ERROR_UNDEFINED
 
 # ------------------------------------------------------------------------------
 #
