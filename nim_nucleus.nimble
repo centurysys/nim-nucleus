@@ -5,6 +5,7 @@ author        = "Takeyoshi Kikuchi"
 description   = "A new awesome nimble package"
 license       = "MIT"
 srcDir        = "src"
+binDir        = "bin"
 installExt    = @["nim"]
 bin           = @["nim_nucleus"]
 
