@@ -17,7 +17,7 @@ type
     minCeLength*: uint16
     maxCeLength*: uint16
 
-# Event
+# Event (Common)
 type
   # 1.4.4 GATT 接続通知
   GattConEvent* = object
@@ -31,3 +31,14 @@ type
   GattDisconEvent* = object
     gattResult*: uint16
     gattId*: uint16
+
+# Event (Client)
+type
+  # 1.5.70 GATT Handle Value 通知
+  GattHandleValueEvent* = object
+    gattResult*: uint16
+    gattId*: uint16
+    peerAddrType*: AddrType
+    peerAddr*: uint64
+    handle*: uint16
+    values*: string
