@@ -1,5 +1,6 @@
 import std/strformat
 import std/strutils
+import ../lib/syslog
 
 # ------------------------------------------------------------------------------
 #
@@ -112,3 +113,13 @@ proc bdAddr2string*(x: uint64): string =
     let octet = ((x shr (idx * 8)) and 0xff).uint8
     octets[5 - idx] = &"{octet:02X}"
   result = octets.join(":")
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc checkPayloadLen*(procName: string, payload: string, length: int): bool =
+  if payload.len != length:
+    let errmsg = &"! {procName}: payload length error, {payload.len} [bytes]"
+    syslog.error(errmsg)
+  else:
+    result = true

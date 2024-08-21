@@ -12,6 +12,8 @@ import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
 import ./util
+export opc
+export asyncsync
 
 type
   #GattId = distinct uint16
@@ -53,8 +55,9 @@ type
     tblGattQueues: TableRef[uint16, GattQueuesPtr]
   BleClient* = ref BleClientObj
   GattClientObj = object
-    ble: ptr BleClient
+    ble*: ptr BleClient
     gattId*: uint16
+    conHandle*: uint16
   GattClient* = ref GattClientObj
 
 const
@@ -296,16 +299,6 @@ proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc
   let hciCode = response.getu8(2)
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   result = hciCode.checkHciStatus(procName)
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc checkPayloadLen*(procName: string, payload: string, length: int): bool =
-  if payload.len != length:
-    let errmsg = &"! {procName}: payload length error, {payload.len} [bytes]"
-    syslog.error(errmsg)
-  else:
-    result = true
 
 # ==============================================================================
 # GATT Client
