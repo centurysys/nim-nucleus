@@ -8,35 +8,52 @@ import ../lib/asyncsync
 import ../lib/syslog
 import ./btm
 import ./basic/types
+import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
 import ./util
 
 type
-  GattId = distinct uint16
+  #GattId = distinct uint16
   EventObj = object
     deque: Deque[string]
     ev: AsyncEv
     initialized: bool
   Event = ptr EventObj
+  GattConfirmObj = object
+    opc: uint16
+    gattId*: uint16
+    gattResult*: int16
+  GattConfirm* = ref GattConfirmObj
+  GattEventObj = object
+    opc: uint16
+    gattId*: uint16
+    gattResult*: int16
+    payload*: string
+  GattEvent = ref GattEventObj
   GattQueuesObj* = object
     gattId*: uint16
-    respQueue*: AsyncQueue[string]
-    eventQueue*: AsyncQueue[string]
+    respQueue*: AsyncQueue[GattConfirm]
+    gattEventQueue*: AsyncQueue[GattEvent]
+    gattNotifyQueue*: AsyncQueue[GattEvent]
   GattQueues* = ref GattQueuesObj
   GattQueuesPtr* = ptr GattQueuesObj
   BleClientObj = object
-    started: bool
+    debug: bool
+    bmtStarted: bool
+    running: bool
+    lck: AsyncLock
     event: Event
     callbackInitialized: bool
     btmMode: BtmMode
     localAddr: array[6, uint8]
-    tblGattQueues: TableRef[GattId, GattQueuesPtr]
-    mainRespQueue*: AsyncQueue[string]
+    cmdQueue: AsyncQueue[string]
+    mainRespQueue: AsyncQueue[string]
     mainEventQueue*: AsyncQueue[string]
+    tblGattQueues: TableRef[uint16, GattQueuesPtr]
   BleClient* = ref BleClientObj
   GattClientObj = object
-    ble*: ptr BleClientObj
+    ble: ptr BleClient
     gattId*: uint16
   GattClient* = ref GattClientObj
 
@@ -56,6 +73,13 @@ proc dump(x: string): string =
   result = s.join(" ")
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc debugEcho*(self: BleClient, msg: string) =
+  if self.debug:
+    echo msg
+
+# ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
 proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
@@ -65,33 +89,120 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   ev.ev.fire()
 
 # ------------------------------------------------------------------------------
-#
+# Handle GATT Confirm
+# ------------------------------------------------------------------------------
+proc gattResponseHandler(self: BleClient, opc: uint16, response: string) {.async.} =
+  if response.len != 6:
+    return
+  let gattId = response.getLe16(4)
+  if self.tblGattQueues.hasKey(gattId):
+    let queue = self.tblGattQueues[gattId]
+    let cfm = new GattConfirm
+    cfm.opc = response.getOpc()
+    cfm.gattId = gattId
+    cfm.gattResult = response.getLeInt16(2)
+    await queue.respQueue.put(cfm)
+
+# ------------------------------------------------------------------------------
+# Handle GATT Event
+# ------------------------------------------------------------------------------
+proc gattEventHandler(self: BleClient, opc: uint16, response: string) {.async.} =
+  if response.len != 6:
+    return
+  let gattId = response.getLe16(4)
+  if self.tblGattQueues.hasKey(gattId):
+    let queue = self.tblGattQueues[gattId]
+    let event = new GattEvent
+    event.opc = response.getOpc()
+    event.gattId = gattId
+    event.gattResult = response.getLeInt16(2)
+    event.payload = response
+    await queue.gattEventQueue.put(event)
+
+# ------------------------------------------------------------------------------
+# Handle GATT Notify
+# ------------------------------------------------------------------------------
+proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.} =
+  if response.len != 6:
+    return
+  let gattId = response.getLe16(4)
+  if self.tblGattQueues.hasKey(gattId):
+    let queue = self.tblGattQueues[gattId]
+    if queue.gattNotifyQueue.full:
+      return
+    let event = new GattEvent
+    event.opc = response.getOpc()
+    event.gattId = gattId
+    event.gattResult = response.getLeInt16(2)
+    event.payload = response
+    await queue.gattNotifyQueue.put(event)
+
+# ------------------------------------------------------------------------------
+# BTM Task: Response Handler
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
+  proc releaseLock(self: BleClient) =
+    if self.lck.locked:
+      self.lck.release()
+
   while true:
     await self.event.ev.wait()
     while self.event.deque.len > 0:
-      let event = self.event.deque.popFirst()
-      if event.len < 3:
+      let response = self.event.deque.popFirst()
+      if response.len < 3:
         continue
-      let opc = event.getOpc()
-      echo &"* OPC: {opc:04X}"
+      let opc = response.getOpc()
+      self.debugEcho(&"### Response from BTM: OPC: {opc:04X}")
       if opc in OPC_MAIN_RESPONSES:
-        await self.mainRespQueue.put(event)
+        self.debugEcho(" -> OPC_MAIN_RESPONSES")
+        self.releaseLock()
+        await self.mainRespQueue.put(response)
       elif opc in OPC_MAIN_EVENTS:
-        await self.mainEventQueue.put(event)
+        self.debugEcho(" -> OPC_MAIN_EVENTS")
+        await self.mainEventQueue.put(response)
       elif opc in OPC_GATT_CLIENT_CONFIRMATIONS:
-        discard
+        self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
+        self.releaseLock()
+        await self.gattResponseHandler(opc, response)
       elif opc in OPC_GATT_CLIENT_EVENTS:
-        discard
+        self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
+        await self.gattEventHandler(opc, response)
+      elif opc in OPC_GATT_CLIENT_NOTIFY:
+        self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
+        await self.gattNotifyHandler(opc, response)
+      else:
+        self.debugEcho("OPC not found")
+      # 他のtaskにまわす
+      await sleepAsync(1)
     self.event.ev.clear()
+
+# ==============================================================================
+# BTM Task: Sender
+# ==============================================================================
+proc taskSender(self: BleClient) {.async.} =
+  while true:
+    let payload = await self.cmdQueue.get()
+    if not self.bmtStarted:
+      continue
+    self.debugEcho(&"* sender: payload: {dump(payload)}")
+    await self.lck.acquire()
+    self.debugEcho(" BTM_Send()...")
+    let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
+    self.debugEcho(&" BTM_Send() -> result: {res}")
+    if res != 0:
+      # コマンド送信失敗なので Lock をリリースする
+      if self.lck.locked:
+        self.lck.release()
+
+proc taskDummy(self: BleClient) {.async.} =
+  while true:
+    await sleepAsync(10000)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
 proc newEvent(dequeSize: int = DEQUE_SIZE, aqSize: int = AQUEUE_SIZE): Event =
   if not ev.initialized:
-    echo "initialize event.."
     ev.ev = newAsyncEv()
     ev.deque = initDeque[string](DEQUE_SIZE)
     ev.initialized = true
@@ -100,17 +211,19 @@ proc newEvent(dequeSize: int = DEQUE_SIZE, aqSize: int = AQUEUE_SIZE): Event =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleClient*(): BleClient =
+proc newBleClient*(debug: bool = false): BleClient =
   new result
   result.event = newEvent()
   result.mainRespQueue = newAsyncQueue[string](5)
   result.mainEventQueue = newAsyncQueue[string](5)
+  result.cmdQueue = newAsyncQueue[string](8)
+  result.debug = debug
 
 # ------------------------------------------------------------------------------
 # API: BTM 初期化
 # ------------------------------------------------------------------------------
 proc initBTM*(self: BleClient): Future[bool] {.async.} =
-  if self.started:
+  if self.bmtStarted:
     return true
   if not self.callbackInitialized:
     let res = BTM_SetCallback(callback)
@@ -118,35 +231,39 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
       let errmsg = &"! BleClient::init set callback failed with {res}."
       syslog.error(errmsg)
       return
+    self.lck = newAsyncLock()
     self.callbackInitialized = true
+    asyncCheck self.taskDummy()
     asyncCheck self.responseHandler()
-  echo "BTM_Start()"
+    asyncCheck self.taskSender()
+  self.debugEcho("BTM_Start()")
+  self.lck.own()
   let res = BTM_Start(BTM_MODE_NORMAL)
   if res != 0:
+    self.lck.release()
     let errmsg = &"! BleClient::init start BTM failed with {res}."
     syslog.error(errmsg)
     return
-  echo "wait..."
+  self.debugEcho("wait...")
   let pkt = await self.mainRespQueue.get()
-  echo &"--> received: {pkt.dump} {pkt.len} bytes."
-  self.started = true
+  self.debugEcho(&"--> received: {pkt.dump} {pkt.len} bytes.")
+  self.bmtStarted = true
+  result = true
+
+# ------------------------------------------------------------------------------
+# Send Command
+# ------------------------------------------------------------------------------
+proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
+  if not self.bmtStarted:
+    return
+  await self.cmdQueue.put(payload)
   result = true
 
 # ------------------------------------------------------------------------------
 # API: Send Command
 # ------------------------------------------------------------------------------
-proc btmSend*(self: BleClient, payload: string): bool =
-  if not self.started:
-    return
-  let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
-  if res == 0:
-    result = true
-
-# ------------------------------------------------------------------------------
-# API: Send Command
-# ------------------------------------------------------------------------------
 proc btmSendRecv*(self: BleClient, payload: string): Future[Option[string]] {.async.} =
-  if not self.btmSend(payload):
+  if not await self.btmSend(payload):
     return
   let res = await self.mainRespQueue.get()
   if res.len > 0:
@@ -170,12 +287,14 @@ proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc
     syslog.error(errmsg)
     return
   let response = res_opt.get()
+  self.debugEcho(&"* {procName}: response: {dump(response)}")
   let resOpc = response.getOpc(0)
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
     return
-  let hciCode = payload[2].int
+  let hciCode = response.getu8(2)
+  self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   result = hciCode.checkHciStatus(procName)
 
 # ------------------------------------------------------------------------------
@@ -187,6 +306,90 @@ proc checkPayloadLen*(procName: string, payload: string, length: int): bool =
     syslog.error(errmsg)
   else:
     result = true
+
+# ==============================================================================
+# GATT Client
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# GATT Client: Send Instruction -> Wait Confirmwation
+# ------------------------------------------------------------------------------
+proc gattSend(self: GattClient, gattId: uint16, payload: string, expOpc: uint16):
+    Future[bool] {.async.} =
+  if not self.ble[].tblGattQueues.hasKey(gattId):
+    let errmsg = &"! gattSend: no such GattID: 0x{gattId:04x}."
+    syslog.error(errmsg)
+    return
+  if not await self.ble[].btmSend(payload):
+    let errmsg = "! gattSend: send failed."
+    syslog.error(errmsg)
+    return
+  let gattQueues = self.ble[].tblGattQueues[gattId]
+  let res = await gattQueues.respQueue.get()
+  if res.opc != expOpc:
+    syslog.error(&"! gattSend: OPC in response mismatch, {res.opc:04x} != {expOpc:04x}")
+    return
+  if res.gattResult != 0:
+    let gattError = res.gattResult.gattResultToString()
+    syslog.error(&"! gattSend: failed, {gattError}")
+    return
+  result = true
+
+# ------------------------------------------------------------------------------
+# API: Send Instrucion -> Wait Event
+# ------------------------------------------------------------------------------
+proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: uint16):
+    Future[Option[string]] {.async.} =
+  let gattId = self.gattId
+  if not await self.gattSend(gattId, payload, cfmOpc):
+    return
+  let gattQueues = self.ble[].tblGattQueues[gattId]
+  let response = await gattQueues.gattEventQueue.get()
+  if response.payload.getOpc() == evtOpc:
+    result = some(response.payload)
+
+# ------------------------------------------------------------------------------
+# API: Send Instrucion -> Wait Event(Multi)
+# ------------------------------------------------------------------------------
+proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
+    endOpc: uint16): Future[Option[seq[string]]] {.async.} =
+  let gattId = self.gattId
+  if not await self.gattSend(gattId, payload, cfmOpc):
+    return
+  let gattQueues = self.ble[].tblGattQueues[gattId]
+  var payloads = newSeqOfCap[string](5)
+  while true:
+    let response = await gattQueues.gattEventQueue.get()
+    if response.gattResult != 0:
+      return
+    payloads.add(response.payload)
+    let resOpc = response.payload.getOpc()
+    if resOpc == endOpc:
+      break
+  result = some(payloads)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc newGattQueues(self: BleClient, gattId: uint16): GattQueues =
+  new result
+  result.gattId = gattID
+  result.respQueue = newAsyncQueue[GattConfirm](4)
+  result.gattEventQueue = newAsyncQueue[GattEvent](8)
+  result.gattNotifyQueue = newAsyncQueue[GattEvent](6)
+
+# ------------------------------------------------------------------------------
+# Constructor:
+# ------------------------------------------------------------------------------
+proc newGattClient*(self: BleClient, gattId: uint16): Option[GattClient] =
+  if self.tblGattQueues.hasKey(gattId):
+    return
+  let gattQueues = self.newGattQueues(gattId)
+  self.tblGattQueues[gattId] = addr gattQueues[]
+  let res = new GattClient
+  res.ble = addr self
+  res.gattId = gattId
+  result = some(res)
 
 
 when isMainModule:
