@@ -82,15 +82,18 @@ proc parseAdvertisingReport*(self: BleClient, payload: string): Option[Advertisi
     return
   try:
     var res: AdvertisingReport
-    res.eventType = payload[2].EventType
-    res.addrType = payload[3].AddrType
+    res.eventType = payload.getU8(2).EventType
+    res.addrType = payload.getU8(3).AddrType
     res.bdAddr = payload.getBdAddr(4)
-    let dataLen = payload[10].uint8
-    res.data = newString(dataLen)
-    copyMem(addr res.data[0], addr payload[11], dataLen)
-    res.rssi = payload[42].int8
+    let dataLen = payload.getU8(10).int
+    if dataLen > 0:
+      res.data = newString(dataLen)
+      copyMem(addr res.data[0], addr payload[11], dataLen)
+    res.rssi = payload.getS8(42)
     result = some(res)
   except:
+    let e = getCurrentException()
+    echo e.getStackTrace()
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
     syslog.error(errmsg)
@@ -105,9 +108,9 @@ proc parseDisconnectionComplete*(self: BleClient, payload: string):
     return
   try:
     var res: DisconnectionCompleteEvent
-    res.hciStatus = payload[2].HciStatus
+    res.hciStatus = payload.getU8(2).toHciStatus
     res.conHandle = payload.getLe16(3)
-    res.reason = payload[5].HciStatus
+    res.reason = payload.getU8(5).toHciStatus
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
@@ -124,17 +127,17 @@ proc parseEnhConnectionComplete*(self: BleClient, payload: string):
     return
   try:
     var res: EnhConnectionCompleteEvent
-    res.hciStatus = payload[2].HciStatus
+    res.hciStatus = payload.getU8(2).toHciStatus
     res.conHandle = payload.getLe16(3)
-    res.role = payload[5].Role
-    res.peerAddrType = payload[6].AddrType
+    res.role = payload.getU8(5).Role
+    res.peerAddrType = payload.getU8(6).AddrType
     res.peerAddr = payload.getBdAddr(7)
     res.localPrivateAddr = payload.getBdAddr(13)
     res.remotePrivateAddr = payload.getBdAddr(19)
     res.conInterval = payload.getLe16(25)
     res.conLatency = payload.getLe16(27)
     res.supervisionTimeout = payload.getLe16(29)
-    res.masterClockAccuracy = payload[31].ClockAccuracy
+    res.masterClockAccuracy = payload.getU8(31).ClockAccuracy
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
@@ -152,7 +155,7 @@ proc parseChannelSelAlgorithm*(self: BleClient, payload: string):
   try:
     var res: ChannelSelAlgorithmReport
     res.conHandle = payload.getLe16(2)
-    res.alg = payload[4].ChannSelAlgorithm
+    res.alg = payload.getU8(4).ChannSelAlgorithm
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
