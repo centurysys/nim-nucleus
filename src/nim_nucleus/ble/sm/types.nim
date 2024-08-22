@@ -35,33 +35,41 @@ type
   LocalAddr* = object
     addrType*: AddrType
     address*: uint64
+
+# Event
+type
+  # 1.3.18 LE ローカルセキュリティ設定通知 (0x407C)
   LocalSecurity* = object
     peer*: PeerAddr
     auth*: Authentication
     encKeySize*: uint8
-    authorized*: bool
-  PeerLtk* = object
+    authorization*: bool
+  # 1.3.19 LE LTK 受信通知 (0x405D) / 1.3.24 LE LTK 送信通知 (0x4072)
+  LtkEvent* = object
     peer*: PeerAddr
     ltk*: array[16, uint8]
-  PeerEdivRand* = object
+  # 1.3.20 LE EDIV Rand 受信通知 (0x405E) / 1.3.25 LE EDIV Rand 送信通知 (0x4073)
+  EdivRandEvent* = object
     peer*: PeerAddr
     ediv*: uint16
     rand*: array[8, uint8]
-  PeerIrk* = object
+  # 1.3.21 LE IRK 受信通知 (0x405F) / 1.3.26 LE IRK 送信通知 (0x4074)
+  IrkEvent* = object
     peer*: PeerAddr
     irk*: array[16, uint8]
-  PeerAddressInfo* = object
+  # 1.3.22 LE Address Information 受信通知 (0x4070)
+  # 1.3.27 LE Address Information 送信通知 (0x4075)
+  AddressInfoEvent* = object
     peer*: PeerAddr
     peerId*: PeerAddr
-  PeerCsrk* = object
+  # 1.3.23 LE CSRK 受信通知 (0x4071) / 1.3.28 LE CSRK 送信通知 (0x4076)
+  CsrkEvent* = object
     peer*: PeerAddr
     csrk*: array[16, uint8]
-  LocalIrk* = object
+  # 1.3.29 LE 認証完了通知
+  AuthCompleteEvent* = object
     peer*: PeerAddr
-    irk*: array[16, uint8]
-
-type
-  # 1.3.34 LE 認証失敗通知 (0x407b)
+  # 1.3.34 LE 認証失敗通知 (0x407B)
   AuthFailInfo* = object
     peer*: PeerAddr
     smReason*: SmReason
