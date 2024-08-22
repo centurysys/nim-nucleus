@@ -20,6 +20,9 @@ type
     of BTM_D_OPC_BLE_GAP_DISCONNECTION_COMPLETE_EVT:
       # LE Disconnection Complete 通知 (0x401B)
       leDisconData*: DisconnectionCompleteEvent
+    of BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_EVT:
+      # LE Connection Update 通知 (0x4032)
+      leConUpdateData*: ConnectionUpdateEvent
     of BTM_D_OPC_BLE_GAP_ENCRYPTION_CHANGE_EVT:
       # LE Encryption Change 通知 (0x4037)
       leEncryptionChangeData*: EncryptionChangeEvent
@@ -94,6 +97,16 @@ proc parseEvent*(payload: string): Option[Notification] =
     let data = payload.parseDisconnectionComplete()
     if data.isSome:
       let res = Notification(opc: opc, leDisconData: data.get(), valid: true)
+      result = some(res)
+  of BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_EVT:
+    let data = payload.parseConnectionUpdate()
+    if data.isSome:
+      let res = Notification(opc: opc, leConUpdateData: data.get(), valid: true)
+      result = some(res)
+  of BTM_D_OPC_BLE_GAP_ENCRYPTION_CHANGE_EVT:
+    let data = payload.parseEncryptionChange()
+    if data.isSome:
+      let res = Notification(opc: opc, leEncryptionChangeData: data.get(), valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_GAP_ENHANCED_CONNECTION_COMPLETE_EVT:
     let data = payload.parseEnhConnectionComplete()
