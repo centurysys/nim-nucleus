@@ -1,5 +1,6 @@
 import std/strformat
 import std/tables
+import ../../lib/syslog
 
 const
   gattCode2string = {
@@ -68,6 +69,19 @@ proc gattResultToString*(code: int16|int, detail = false): string =
         result = &"{errinfo[0]} ({code})"
       else:
         result = &"{errinfo[0]} ({errinfo[1]}) (code: {code})"
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc logGattResult*(procName: string, code: int16, detail = false) =
+  let s = gattResultToString(code, detail)
+  let success = code >= 0
+  let prefix = if success: "*" else: "!"
+  let msg = &"{prefix} {procName}: GATT result: {s}."
+  if success:
+    syslog.info(msg)
+  else:
+    syslog.error(msg)
 
 
 when isMainModule:
