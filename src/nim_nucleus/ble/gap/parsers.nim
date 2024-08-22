@@ -54,6 +54,26 @@ proc parseDisconnectionComplete*(payload: string): Option[DisconnectionCompleteE
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.2.30 LE Connection Update 通知
+# ------------------------------------------------------------------------------
+proc parseConnectionUpdate*(payload: string): Option[ConnectionUpdateEvent] =
+  const procName = "parseConnectionUpdate"
+  if not checkPayloadLen(procName, payload, 11):
+    return
+  try:
+    var res: ConnectionUpdateEvent
+    res.hciStatus = payload.getU8(2).toHciStatus
+    res.conHandle = payload.getLe16(3)
+    res.conInterval = payload.getLe16(5)
+    res.conLatency = payload.getLe16(7)
+    res.supervisionTimeout = payload.getLe16(9)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.2.71 LE Enhanced Connection Complete 通知
 # ------------------------------------------------------------------------------
 proc parseEnhConnectionComplete*(payload: string): Option[EnhConnectionCompleteEvent] =

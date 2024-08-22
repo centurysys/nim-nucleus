@@ -109,7 +109,7 @@ type
     conLatency*: uint16
     supervisionTImeout*: uint16
     masterClockAccuracy*: ClockAccuracy
-  # L1.2.78 E Channel Selection Algorithm 通知 (0x41be)
+  # 1.2.78 LE Channel Selection Algorithm 通知 (0x41be)
   ChannelSelAlgorithmReport* = object
     conHandle*: uint16
     alg*: ChannSelAlgorithm
