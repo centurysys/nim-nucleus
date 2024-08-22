@@ -20,7 +20,7 @@ type
 # Event (Common)
 type
   GattEventCommon* = object
-    gattResult*: uint16
+    gattResult*: int16
     gattId*: uint16
   # 1.4.4 GATT 接続通知
   GattConEvent* = object

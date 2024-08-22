@@ -13,7 +13,7 @@ export types
 # GATT Common Fields
 # ------------------------------------------------------------------------------
 proc parseGattEventCommon(payload: string): GattEventCommon {.inline.} =
-  result.gattResult = payload.getLe16(2)
+  result.gattResult = payload.getLeInt16(2)
   result.gattId = payload.getLe16(4)
 
 # ------------------------------------------------------------------------------
