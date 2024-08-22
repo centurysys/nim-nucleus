@@ -74,6 +74,24 @@ proc parseConnectionUpdate*(payload: string): Option[ConnectionUpdateEvent] =
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.2.36 LE Encryption Change 通知
+# ------------------------------------------------------------------------------
+proc parseEncryptionChange*(payload: string): Option[EncryptionChangeEvent] =
+  const procName = "parseEncryptionChange"
+  if not checkPayloadLen(procName, payload, 6):
+    return
+  try:
+    var res: EncryptionChangeEvent
+    res.hciStatus = payload.getU8(2).toHciStatus
+    res.conHandle = payload.getLe16(3)
+    res.encryptionEnabled = payload.getU8(5) == 0x01'u8
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.2.71 LE Enhanced Connection Complete 通知
 # ------------------------------------------------------------------------------
 proc parseEnhConnectionComplete*(payload: string): Option[EnhConnectionCompleteEvent] =
