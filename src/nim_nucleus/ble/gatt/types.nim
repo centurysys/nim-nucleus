@@ -19,21 +19,27 @@ type
 
 # Event (Common)
 type
-  # 1.4.4 GATT 接続通知
-  GattConEvent* = object
+  GattEventCommon* = object
     gattResult*: uint16
     gattId*: uint16
+  # 1.4.4 GATT 接続通知
+  GattConEvent* = object
+    common*: GattEventCommon
     attMtu*: uint16
     peerAddrType*: AddrType
     peerAddr*: uint64
     controlRole*: Role
   # 1.4.7 GATT 切断通知
   GattDisconEvent* = object
-    gattResult*: uint16
-    gattId*: uint16
+    common*: GattEventCommon
 
 # Event (Client)
 type
+  # 1.5.3 Gatt Exchange MTU 通知
+  GattExchangeMtuEvent* = object
+    common*: GattEventCommon
+    serverMtu*: uint16
+
   # 1.5.70 GATT Handle Value 通知
   GattHandleValueEvent* = object
     gattResult*: uint16
