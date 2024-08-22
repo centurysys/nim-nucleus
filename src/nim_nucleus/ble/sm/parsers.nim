@@ -10,7 +10,7 @@ export types
 # Event Parsers
 # ==============================================================================
 
-func sendReceive(send: bool): string =
+func sendReceive(send: bool): string {.inline.} =
   result = if send: "Send" else: "Receive"
 
 # ------------------------------------------------------------------------------
@@ -190,14 +190,13 @@ proc parseCsrkSendEvent*(payload: string): Option[CsrkEvent] =
 # ------------------------------------------------------------------------------
 # 1.3.29 LE 認証完了通知
 # ------------------------------------------------------------------------------
-proc parseAuthenticationCompleteEvent*(payload: string): Option[PeerAddr] =
+proc parseAuthenticationCompleteEvent*(payload: string): Option[AuthCompleteEvent] =
   const procName = "parseAuthenticationCompleteEvent"
   if not checkPayloadLen(procName, payload, 9):
     return
   try:
-    var res: PeerAddr
-    res.addrType = payload.getU8(2).AddrType
-    res.address = payload.getBdAddr(3)
+    var res: AuthCompleteEvent
+    res.peer = payload.parsePeer()
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
@@ -213,8 +212,7 @@ proc parseAuthenticationFailEvent*(payload: string): Option[AuthFailInfo] =
     return
   try:
     var res: AuthFailInfo
-    res.peer.addrType = payload.getU8(2).AddrType
-    res.peer.address = payload.getBdAddr(3)
+    res.peer = payload.parsePeer()
     res.smReason = payload.getU8(9).SmReason
     result = some(res)
   except:
