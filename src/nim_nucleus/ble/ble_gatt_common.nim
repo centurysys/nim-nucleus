@@ -3,21 +3,21 @@ import std/options
 import std/strformat
 import std/tables
 import ./ble_client
+import ./ble_gap
+import ./notifications
 import ./core/opc
+import ./core/gatt_result
 import ./gatt/requests
 import ./gatt/types
 import ./util
+import ../lib/asyncsync
 import ../lib/syslog
 export types
 
-# ==============================================================================
-# Common functions
-# ==============================================================================
-
 # ------------------------------------------------------------------------------
-# API: Send Indication/Receive Confirmation
+# Send Instruction/Receive Confirmation
 # ------------------------------------------------------------------------------
-proc btmIndication*(self: BleClient, procName: string, payload: string,
+proc btmInstruction(self: BleClient, procName: string, payload: string,
     expectedOpc: uint16): Future[Option[int16]] {.async.} =
   let res_opt = await self.btmSendRecv(payload)
   if res_opt.isNone:
@@ -34,7 +34,7 @@ proc btmIndication*(self: BleClient, procName: string, payload: string,
   result = some(res)
 
 # ==============================================================================
-# Indications
+# Instructions
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -74,8 +74,7 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
       setLe16(buf, pos + 14, connparam.maxCeLength)
       pos.inc(16)
   buf[12] = phys
-  let gattRes = await self.btmIndication(procName, buf.toString, expectedOpc)
-  result = gattRes
+  result = await self.btmInstruction(procName, buf.toString, expectedOpc)
 
 # ------------------------------------------------------------------------------
 # 1.4.5 GATT 切断指示
@@ -89,11 +88,18 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[in
   var buf: array[4, uint8]
   buf.setOpc(0, indOpc)
   buf.setLe16(2, gattId)
-  result = await self.btmIndication(procName, buf.toString, expectedOpc)
+  result = await self.btmInstruction(procName, buf.toString, expectedOpc)
 
 # ==============================================================================
 # Event Parsers
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Common
+# ------------------------------------------------------------------------------
+proc parseGattEventCommon(payload: string): GattEventCommon {.inline.} =
+  result.gattResult = payload.getLe16(2)
+  result.gattId = payload.getLe16(4)
 
 # ------------------------------------------------------------------------------
 # 1.4.4 GATT 接続通知
@@ -104,12 +110,12 @@ proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
     return
   try:
     var res: GattConEvent
-    res.gattResult = payload.getLe16(2)
-    res.gattId = payload.getLe16(4)
+    res.common = payload.parseGattEventCommon()
     res.attMtu = payload.getLe16(6)
     res.peerAddrType = payload.getU8(8).AddrType
     res.peerAddr = payload.getBdAddr(9)
     res.controlRole = payload.getU8(15).Role
+    result = some(res)
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
@@ -124,9 +130,63 @@ proc parseGattCommonDisconnectEvent*(payload: string): Option[GattDisconEvent] =
     return
   try:
     var res: GattDisconEvent
-    res.gattResult = payload.getLe16(2)
-    res.gattId = payload.getLe16(4)
+    res.common = payload.parseGattEventCommon()
+    result = some(res)
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
     syslog.error(errmsg)
+
+# ==============================================================================
+# Instruction/Confirm -> Wait Event
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# GATT 接続
+# ------------------------------------------------------------------------------
+proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattClient]]
+    {.async.} =
+  const procName = "gattConnect"
+  let gattRes_opt = await self.gattCommonConnectIns(params)
+  if gattRes_opt.isNone:
+    syslog.error(&"! {procName}: GATT connection failed.")
+    return
+  let gattRes = gattRes_opt.get()
+  if gattRes != 0:
+    let errmsg = gattResultToString(gattRes, detail = true)
+    syslog.error(&"! {procName}: GATT connection failed, {errmsg}.")
+    return
+  var
+    gattId: Option[uint16]
+    conHandle: Option[uint16]
+    mtu: Option[uint16]
+    alg: Option[ChannSelAlgorithm]
+  while true:
+    let payload = await self.mainEventQueue.get()
+    let msg_opt = payload.parseEvent()
+    if msg_opt.isNone:
+      continue
+    let msg = msg_opt.get()
+    case msg.opc:
+    of BTM_D_OPC_BLE_GAP_ENHANCED_CONNECTION_COMPLETE_EVT:
+      # LE Enhanced Connection Complete 通知
+      conHandle = some(msg.leConData.conHandle)
+    of BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT:
+      # GATT 接続通知
+      gattId = some(msg.gattConData.common.gattId)
+    of BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
+      # Gatt Exchange MTU 通知
+      mtu = some(msg.gattExchangeMtuData.serverMtu)
+    of BTM_D_OPC_BLE_GAP_CHANNEL_SELECTION_ALGORITHM_EVT:
+      # LE Channel Selection Algorithm 通知
+      alg = some(msg.leChanAlgData.alg)
+    else:
+      discard
+    if gattId.isSome and conHandle.isSome and mtu.isSome and alg.isSome:
+      # 4つの通知受信完了
+      let client = new GattClient
+      client.ble = addr self
+      client.gattId = gattId.get()
+      client.conHandle = conHandle.get()
+      client.mtu = mtu.get()
+      return some(client)
