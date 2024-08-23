@@ -20,8 +20,8 @@ proc parseAdvertisingReport*(payload: string): Option[AdvertisingReport] =
   try:
     var res: AdvertisingReport
     res.eventType = payload.getU8(2).EventType
-    res.addrType = payload.getU8(3).AddrType
-    res.bdAddr = payload.getBdAddr(4)
+    res.peer.addrType = payload.getU8(3).AddrType
+    res.peer.address = payload.getBdAddr(4)
     let dataLen = payload.getU8(10).int
     if dataLen > 0:
       res.data = newString(dataLen)
@@ -103,8 +103,8 @@ proc parseEnhConnectionComplete*(payload: string): Option[EnhConnectionCompleteE
     res.hciStatus = payload.getU8(2).toHciStatus
     res.conHandle = payload.getLe16(3)
     res.role = payload.getU8(5).Role
-    res.peerAddrType = payload.getU8(6).AddrType
-    res.peerAddr = payload.getBdAddr(7)
+    res.peer.addrType = payload.getU8(6).AddrType
+    res.peer.address = payload.getBdAddr(7)
     res.localPrivateAddr = payload.getBdAddr(13)
     res.remotePrivateAddr = payload.getBdAddr(19)
     res.conInterval = payload.getLe16(25)

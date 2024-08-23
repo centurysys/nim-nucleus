@@ -74,8 +74,7 @@ type
   # 1.2.15 LE Advertising Report (0x4017)
   AdvertisingReport* = object
     eventType*: EventType
-    addrType*: AddrType
-    bdAddr*: uint64
+    peer*: PeerAddr
     name*: Option[string]
     data*: string
     rssi*: int8
@@ -101,8 +100,7 @@ type
     hciStatus*: HciStatus
     conHandle*: uint16
     role*: Role
-    peerAddrType*: AddrType
-    peerAddr*: uint64
+    peer*: PeerAddr
     localPrivateAddr*: uint64
     remotePrivateAddr*: uint64
     conInterval*: uint16
