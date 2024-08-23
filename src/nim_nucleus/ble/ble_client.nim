@@ -35,9 +35,9 @@ type
   GattEvent = ref GattEventObj
   GattQueuesObj* = object
     gattId*: uint16
-    respQueue*: AsyncQueue[GattConfirm]
-    gattEventQueue*: AsyncQueue[GattEvent]
-    gattNotifyQueue*: AsyncQueue[GattEvent]
+    respQueue: AsyncQueue[GattConfirm]
+    gattEventQueue: AsyncQueue[GattEvent]
+    gattNotifyQueue: AsyncQueue[GattEvent]
   GattQueues* = ref GattQueuesObj
   GattQueuesPtr* = ptr GattQueuesObj
   BleClientObj = object
@@ -51,13 +51,18 @@ type
     localAddr: array[6, uint8]
     cmdQueue: AsyncQueue[string]
     mainRespQueue: AsyncQueue[string]
-    mainEventQueue*: AsyncQueue[string]
+    mainAdvQueue: AsyncQueue[string]
+    mainEventQueue: AsyncQueue[string]
     tblGattQueues: TableRef[uint16, GattQueuesPtr]
+    gattClients: seq[ptr GattClient]
+    tblRemoteDevices: TableRef[PeerAddr, RemoteCollectionKeys]
   BleClient* = ref BleClientObj
   GattClientObj = object
     ble*: ptr BleClient
     gattId*: uint16
     conHandle*: uint16
+    queues*: GattQueues
+    mtu*: uint16
   GattClient* = ref GattClientObj
 
 const
@@ -90,6 +95,57 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   copyMem(addr buf[0], df, dl)
   ev.deque.addLast(buf)
   ev.ev.fire()
+
+# ------------------------------------------------------------------------------
+# Put to Response Queue
+# ------------------------------------------------------------------------------
+proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
+  if not self.mainRespQueue.full:
+    await self.mainRespQueue.put(data)
+    result = true
+  else:
+    let errmsg = &"! putResponse: ResponseQueue is full, discarded OPC: [{opc:04X}] !"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# Put to Event Queue
+# ------------------------------------------------------------------------------
+proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
+  if not self.mainEventQueue.full:
+    await self.mainEventQueue.put(data)
+    result = true
+  else:
+    let errmsg = &"! putEvent: EventQueue is full, discarded OPC: [{opc:04X}] !"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# Put to Advertising Queue
+# ------------------------------------------------------------------------------
+proc putAdvertising*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
+  if not self.mainAdvQueue.full:
+    await self.mainAdvQueue.put(data)
+    result = true
+  else:
+    let errmsg = &"! putAdvertising: AdvQueue is full, discarded OPC: [{opc:04X}] !"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# Wait Response Queue
+# ------------------------------------------------------------------------------
+proc waitResponse*(self: BleClient): Future[string] {.async.} =
+  result = await self.mainRespQueue.get()
+
+# ------------------------------------------------------------------------------
+# Wait Event Queue
+# ------------------------------------------------------------------------------
+proc waitEvent*(self: BleClient): Future[string] {.async.} =
+  result = await self.mainEventQueue.get()
+
+# ------------------------------------------------------------------------------
+# Wait Advertising
+# ------------------------------------------------------------------------------
+proc waitAdvertising*(self: BleClient): Future[string] {.async.} =
+  result = await self.mainAdvQueue.get()
 
 # ------------------------------------------------------------------------------
 # Handle GATT Confirm
@@ -155,14 +211,17 @@ proc responseHandler(self: BleClient) {.async.} =
       if response.len < 3:
         continue
       let opc = response.getOpc()
-      self.debugEcho(&"### Response from BTM: OPC: {opc:04X}")
-      if opc in OPC_MAIN_RESPONSES:
+      self.debugEcho(&"### Response from BTM: OPC: [{opc:04X}]")
+      if opc in OPC_GAP_ADVERTISING:
+        self.debugEcho(" -> OPC_GAP_ADVERTISING")
+        discard await self.putAdvertising(opc, response)
+      elif opc in OPC_MAIN_RESPONSES:
         self.debugEcho(" -> OPC_MAIN_RESPONSES")
         self.releaseLock()
-        await self.mainRespQueue.put(response)
+        discard await self.putResponse(opc, response)
       elif opc in OPC_MAIN_EVENTS:
         self.debugEcho(" -> OPC_MAIN_EVENTS")
-        await self.mainEventQueue.put(response)
+        discard await self.putEvent(opc, response)
       elif opc in OPC_GATT_CLIENT_CONFIRMATIONS:
         self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
         self.releaseLock()
@@ -217,9 +276,11 @@ proc newEvent(dequeSize: int = DEQUE_SIZE, aqSize: int = AQUEUE_SIZE): Event =
 proc newBleClient*(debug: bool = false): BleClient =
   new result
   result.event = newEvent()
+  result.mainAdvQueue = newAsyncQueue[string](10)
   result.mainRespQueue = newAsyncQueue[string](5)
   result.mainEventQueue = newAsyncQueue[string](5)
   result.cmdQueue = newAsyncQueue[string](8)
+  result.tblRemoteDevices = newTable[PeerAddr, RemoteCollectionKeys](5)
   result.debug = debug
 
 # ------------------------------------------------------------------------------
@@ -268,7 +329,7 @@ proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
 proc btmSendRecv*(self: BleClient, payload: string): Future[Option[string]] {.async.} =
   if not await self.btmSend(payload):
     return
-  let res = await self.mainRespQueue.get()
+  let res = await self.waitResponse()
   if res.len > 0:
     result = some(res)
 
@@ -382,7 +443,38 @@ proc newGattClient*(self: BleClient, gattId: uint16): Option[GattClient] =
   let res = new GattClient
   res.ble = addr self
   res.gattId = gattId
+  res.queues = gattQueues
   result = some(res)
+
+# ------------------------------------------------------------------------------
+# API:
+# ------------------------------------------------------------------------------
+proc waitConfirm*(self: GattClient): Future[GattConfirm] {.async.} =
+  try:
+    let queue = self.queues.respQueue
+    result = await queue.get()
+  except:
+    discard
+
+# ------------------------------------------------------------------------------
+# API:
+# ------------------------------------------------------------------------------
+proc waitEvent*(self: GattClient): Future[GattEvent] {.async.} =
+  try:
+    let queue = self.queues.gattEventQueue
+    result = await queue.get()
+  except:
+    discard
+
+# ------------------------------------------------------------------------------
+# API:
+# ------------------------------------------------------------------------------
+proc waitNotify*(self: GattClient): Future[GattEvent] {.async.} =
+  try:
+    let queue = self.queues.gattNotifyQueue
+    result = await queue.get()
+  except:
+    discard
 
 
 when isMainModule:
