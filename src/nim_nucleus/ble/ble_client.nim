@@ -54,6 +54,8 @@ type
     mainRespQueue: AsyncQueue[string]
     mainAdvQueue: AsyncQueue[string]
     mainEventQueue: AsyncQueue[string]
+    waitingEvents: seq[uint16]
+    appEventQueue: AsyncQueue[string]
     tblGattQueues: TableRef[uint16, GattQueuesPtr]
     gattClients: seq[ptr GattClient]
     tblRemoteDevices: TableRef[PeerAddr, RemoteCollectionKeys]
@@ -75,15 +77,6 @@ var ev: EventObj
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc dump(x: string): string =
-  var s = newSeqOfCap[string](x.len)
-  for c in x:
-    s.add(&"0x{c.uint8:02x}")
-  result = s.join(" ")
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
 proc debugEcho*(self: BleClient, msg: string) =
   if self.debug:
     echo msg
@@ -96,6 +89,21 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   copyMem(addr buf[0], df, dl)
   ev.deque.addLast(buf)
   ev.ev.fire()
+
+# ------------------------------------------------------------------------------
+# BTM Callback (debug log)
+# ------------------------------------------------------------------------------
+proc debugLogCallback(ctx: pointer, text: cstring) {.cdecl.} =
+  let logtext = ($text).strip()
+  if logtext.len > 0:
+    let buf = &"[BTM Log]: {logtext}"
+    echo buf
+
+# ------------------------------------------------------------------------------
+# BTM Callback (error log)
+# ------------------------------------------------------------------------------
+proc errorLogCallback(ctx: pointer, log: array[8, uint8]) {.cdecl.} =
+  return
 
 # ------------------------------------------------------------------------------
 # Put to Response Queue
@@ -112,12 +120,17 @@ proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.as
 # Put to Event Queue
 # ------------------------------------------------------------------------------
 proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
-  if not self.mainEventQueue.full:
-    await self.mainEventQueue.put(data)
+  if opc in self.waitingEvents:
+    debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Queue.")
+    await self.appEventQueue.put(data)
     result = true
   else:
-    let errmsg = &"! putEvent: EventQueue is full, discarded OPC: [{opc:04X}] !"
-    syslog.error(errmsg)
+    if not self.mainEventQueue.full:
+      await self.mainEventQueue.put(data)
+      result = true
+    else:
+      let errmsg = &"! putEvent: EventQueue is full, discarded OPC: [{opc:04X}] !"
+      syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
 # Put to Advertising Queue
@@ -141,6 +154,15 @@ proc waitResponse*(self: BleClient): Future[string] {.async.} =
 # ------------------------------------------------------------------------------
 proc waitEvent*(self: BleClient): Future[string] {.async.} =
   result = await self.mainEventQueue.get()
+
+# ------------------------------------------------------------------------------
+# Wait Event Queue (for Applications)
+# ------------------------------------------------------------------------------
+proc waitAppEvent*(self: BleClient, events: seq[uint16]): Future[string] {.async.} =
+  self.waitingEvents = events
+  if events.len == 0:
+    return
+  result = await self.appEventQueue.get()
 
 # ------------------------------------------------------------------------------
 # Wait Advertising
@@ -247,7 +269,7 @@ proc taskSender(self: BleClient) {.async.} =
     let payload = await self.cmdQueue.get()
     if not self.bmtStarted:
       continue
-    self.debugEcho(&"* sender: payload: {dump(payload)}")
+    self.debugEcho(&"* sender: payload: {hexDump(payload)}")
     await self.lck.acquire()
     self.debugEcho(" BTM_Send()...")
     let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
@@ -280,6 +302,7 @@ proc newBleClient*(debug: bool = false): BleClient =
   result.mainAdvQueue = newAsyncQueue[string](10)
   result.mainRespQueue = newAsyncQueue[string](5)
   result.mainEventQueue = newAsyncQueue[string](5)
+  result.appEventQueue = newAsyncQueue[string](5)
   result.cmdQueue = newAsyncQueue[string](8)
   result.tblRemoteDevices = newTable[PeerAddr, RemoteCollectionKeys](5)
   result.debug = debug
@@ -296,6 +319,11 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
       let errmsg = &"! BleClient::init set callback failed with {res}."
       syslog.error(errmsg)
       return
+    if self.debug:
+      let nullp = cast[pointer](0)
+      let res = BTM_SetLogOutputCallback(debugLogCallback.BTM_CB_DEBUG_LOG_OUTPUT_FP, nullp,
+          errorLogCallback.BTM_CB_ERROR_LOG_OUTPUT_FP, nullp)
+      echo res
     self.lck = newAsyncLock()
     self.callbackInitialized = true
     asyncCheck self.taskDummy()
@@ -311,7 +339,8 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
     return
   self.debugEcho("wait...")
   let pkt = await self.mainRespQueue.get()
-  self.debugEcho(&"--> received: {pkt.dump} {pkt.len} bytes.")
+  self.debugEcho(&"--> received: {pkt.len} bytes.")
+  self.debugEcho(pkt.hexDump)
   self.bmtStarted = true
   result = true
 
@@ -332,6 +361,7 @@ proc btmSendRecv*(self: BleClient, payload: string): Future[Option[string]] {.as
     return
   let res = await self.waitResponse()
   if res.len > 0:
+    debugEcho(&"--> received: {res.hexDump()}")
     result = some(res)
 
 # ------------------------------------------------------------------------------
@@ -352,7 +382,6 @@ proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc
     syslog.error(errmsg)
     return
   let response = res_opt.get()
-  self.debugEcho(&"* {procName}: response: {dump(response)}")
   let resOpc = response.getOpc(0)
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
@@ -361,6 +390,13 @@ proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc
   let hciCode = response.getu8(2)
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   result = hciCode.checkHciStatus(procName)
+
+# ------------------------------------------------------------------------------
+# Process Event
+# ------------------------------------------------------------------------------
+proc processEvent*(self: BleClient, opc: uint16, payload: string) {.async.} =
+  discard
+
 
 # ==============================================================================
 # GATT Client
@@ -479,14 +515,5 @@ proc waitNotify*(self: GattClient): Future[GattEvent] {.async.} =
 
 
 when isMainModule:
-  proc dummy() {.async.} =
-    while true:
-      await sleepAsync(10000)
-
-  proc main() {.async.} =
-    asyncCheck dummy()
-    let client = newBleClient()
-    let res = await client.initBTM()
-    echo res
-
-  waitFor main()
+  let buf = newString(52)
+  echo buf.hexDump()
