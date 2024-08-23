@@ -14,8 +14,10 @@ type
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc gattDefaultGattConnParams*(): GattConnParams =
+proc gattDefaultGattConnParams*(peerAddr: uint64, random = true): GattConnParams =
   result.filterPolicy = false
   result.ownAddrType = AddrType.Public
   result.randomAddrType = RandomAddrType.NonResolvPrivate
   result.phys[Phy1M] = gattDefaultConnParams()
+  result.peer.addrType = if random: AddrType.Random else: AddrType.Public
+  result.peer.address = peerAddr

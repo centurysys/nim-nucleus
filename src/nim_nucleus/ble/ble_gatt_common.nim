@@ -11,7 +11,7 @@ import ./gatt/requests
 import ./gatt/types
 import ./util
 import ../lib/syslog
-export types
+export types, requests
 
 # ------------------------------------------------------------------------------
 # Send Instruction/Receive Confirmation
@@ -29,7 +29,7 @@ proc btmInstruction(self: BleClient, procName: string, payload: string,
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
     return
-  let res = getLeInt16(payload, 2)
+  let res = response.getLeInt16(2)
   result = some(res)
 
 # ==============================================================================
@@ -45,34 +45,22 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
     procName = "gattCommonConnectIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_INS
     expectedOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_CFM
-  let phyNums = params.phys.len
-  if phyNums == 0 or phyNums > 3:
-    return
-  let pktlen = 13 + 16 * phyNums
-  var buf = newSeqOfCap[uint8](pktlen)
+  var buf = newSeq[uint8](27)
   buf.setOpc(0, indOpc)
   buf[2] = (if params.filterPolicy: 1 else: 0).uint8
-  buf[3] = params.ownAddrType.uint8
-  buf[4] = params.randomAddrType.uint8
-  buf[5] = params.peer.addrType.uint8
-  buf.setBdAddr(6, params.peer.address)
-  var
-    phys: uint8
-    pos = 13
-  for phy in [Phy1M, Phy2M, PhyCoded]:
-    if params.phys.hasKey(phy):
-      phys = phys or phy.uint8
-      let connparam = params.phys[phy]
-      setLe16(buf, pos, connparam.scanInterval)
-      setLe16(buf, pos + 2, connparam.scanWindow)
-      setLe16(buf, pos + 4, connparam.conIntervalMin)
-      setLe16(buf, pos + 6, connparam.conIntervalMax)
-      setLe16(buf, pos + 8, connparam.conLatency)
-      setLe16(buf, pos + 10, connparam.supervisionTimeout)
-      setLe16(buf, pos + 12, connparam.minCeLength)
-      setLe16(buf, pos + 14, connparam.maxCeLength)
-      pos.inc(16)
-  buf[12] = phys
+  let connparam = params.phys[Phy1M]
+  setLe16(buf, 2, connparam.scanInterval)
+  setLe16(buf, 4, connparam.scanWindow)
+  buf[6] = params.peer.addrType.uint8
+  buf.setBdAddr(7, params.peer.address)
+  buf[13] = params.ownAddrType.uint8
+  buf[14] = params.randomAddrType.uint8
+  setLe16(buf, 15, connparam.conIntervalMin)
+  setLe16(buf, 17, connparam.conIntervalMax)
+  setLe16(buf, 19, connparam.conLatency)
+  setLe16(buf, 21, connparam.supervisionTimeout)
+  setLe16(buf, 23, connparam.minCeLength)
+  setLe16(buf, 25, connparam.maxCeLength)
   result = await self.btmInstruction(procName, buf.toString, expectedOpc)
 
 # ------------------------------------------------------------------------------
@@ -111,17 +99,19 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
   var
     gattId: Option[uint16]
     conHandle: Option[uint16]
-    mtu: Option[uint16]
-    alg: Option[ChannSelAlgorithm]
+  const waitingEvents = @[
+    BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT,
+    BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT,
+  ]
   while true:
-    let payload = await self.waitResponse()
+    let payload = await self.waitAppEvent(waitingEvents)
     let msg_opt = payload.parseEvent()
     if msg_opt.isNone:
       continue
     let msg = msg_opt.get()
     case msg.opc:
-    of BTM_D_OPC_BLE_GAP_ENHANCED_CONNECTION_COMPLETE_EVT:
-      # LE Enhanced Connection Complete 通知
+    of BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT:
+      # LE Connection Complete 通知
       conHandle = some(msg.leConData.conHandle)
     of BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT:
       # GATT 接続通知
@@ -131,20 +121,14 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
       else:
         logGattResult(procName, gattResult, detail = true)
         break
-    of BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
-      # Gatt Exchange MTU 通知
-      mtu = some(msg.gattExchangeMtuData.serverMtu)
-    of BTM_D_OPC_BLE_GAP_CHANNEL_SELECTION_ALGORITHM_EVT:
-      # LE Channel Selection Algorithm 通知
-      alg = some(msg.leChanAlgData.alg)
     else:
       discard
-    if gattId.isSome and conHandle.isSome and mtu.isSome and alg.isSome:
-      # 4つの通知受信完了
+    if gattId.isSome and conHandle.isSome:
+      # 2つの通知受信完了
       let client = new GattClient
       client.ble = addr self
       client.gattId = gattId.get()
       client.conHandle = conHandle.get()
-      client.mtu = mtu.get()
       result = some(client)
       break
+  discard await self.waitAppEvent(@[])
