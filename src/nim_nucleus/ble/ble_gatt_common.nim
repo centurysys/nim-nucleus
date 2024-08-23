@@ -55,8 +55,8 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
   buf[2] = (if params.filterPolicy: 1 else: 0).uint8
   buf[3] = params.ownAddrType.uint8
   buf[4] = params.randomAddrType.uint8
-  buf[5] = params.peerAddrType.uint8
-  buf.setBdAddr(6, params.peerAddr)
+  buf[5] = params.peer.addrType.uint8
+  buf.setBdAddr(6, params.peer.address)
   var
     phys: uint8
     pos = 13
@@ -91,53 +91,6 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[in
   result = await self.btmInstruction(procName, buf.toString, expectedOpc)
 
 # ==============================================================================
-# Event Parsers
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# Common
-# ------------------------------------------------------------------------------
-proc parseGattEventCommon(payload: string): GattEventCommon {.inline.} =
-  result.gattResult = payload.getLe16(2)
-  result.gattId = payload.getLe16(4)
-
-# ------------------------------------------------------------------------------
-# 1.4.4 GATT 接続通知
-# ------------------------------------------------------------------------------
-proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
-  const procName = "parseGattCommonConnectEvent"
-  if not checkPayloadLen(procName, payload, 16):
-    return
-  try:
-    var res: GattConEvent
-    res.common = payload.parseGattEventCommon()
-    res.attMtu = payload.getLe16(6)
-    res.peerAddrType = payload.getU8(8).AddrType
-    res.peerAddr = payload.getBdAddr(9)
-    res.controlRole = payload.getU8(15).Role
-    result = some(res)
-  except:
-    let err = getCurrentExceptionMsg()
-    let errmsg = &"! {procName}: caught exception, {err}"
-    syslog.error(errmsg)
-
-# ------------------------------------------------------------------------------
-# 1.4.7 GATT 切断通知
-# ------------------------------------------------------------------------------
-proc parseGattCommonDisconnectEvent*(payload: string): Option[GattDisconEvent] =
-  const procName = "parseGattCommonDisconnectEvent"
-  if not checkPayloadLen(procName, payload, 6):
-    return
-  try:
-    var res: GattDisconEvent
-    res.common = payload.parseGattEventCommon()
-    result = some(res)
-  except:
-    let err = getCurrentExceptionMsg()
-    let errmsg = &"! {procName}: caught exception, {err}"
-    syslog.error(errmsg)
-
-# ==============================================================================
 # Instruction/Confirm -> Wait Event
 # ==============================================================================
 
@@ -162,7 +115,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
     mtu: Option[uint16]
     alg: Option[ChannSelAlgorithm]
   while true:
-    let payload = await self.mainEventQueue.get()
+    let payload = await self.waitResponse()
     let msg_opt = payload.parseEvent()
     if msg_opt.isNone:
       continue
@@ -173,7 +126,12 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
       conHandle = some(msg.leConData.conHandle)
     of BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT:
       # GATT 接続通知
-      gattId = some(msg.gattConData.common.gattId)
+      let gattResult = msg.gattConData.common.gattResult
+      if gattResult == 0:
+        gattId = some(msg.gattConData.common.gattId)
+      else:
+        logGattResult(procName, gattResult, detail = true)
+        break
     of BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
       # Gatt Exchange MTU 通知
       mtu = some(msg.gattExchangeMtuData.serverMtu)
@@ -189,4 +147,5 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
       client.gattId = gattId.get()
       client.conHandle = conHandle.get()
       client.mtu = mtu.get()
-      return some(client)
+      result = some(client)
+      break
