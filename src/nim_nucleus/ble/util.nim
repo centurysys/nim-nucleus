@@ -1,7 +1,35 @@
+import std/options
+import std/sequtils
 import std/strformat
 import std/strutils
 import ../lib/syslog
 
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc hexDump*(x: string): string =
+  const LINESZ = 16
+  var
+    buf: seq[string]
+    lines: seq[string]
+    offsets = newSeqOfCap[string](LINESZ)
+  for i in 0 ..< LINESZ:
+    offsets.add(&"{i:02X}")
+  let addrHdr = offsets.join(" ")
+  let header = &"\n     | {addrHdr}"
+  lines.add(header)
+  lines.add("-".repeat(header.len))
+  for i, c in x.pairs:
+    let offset = i mod LINESZ
+    if offset == 0:
+      buf.setLen(0)
+    buf.add(&"{c.uint8:02x}")
+    if (offset == 15) or i == (x.len - 1):
+      let address = i - offset
+      let content = buf.join(" ")
+      let line = &"{address:04X} | {content}"
+      lines.add(line)
+  result = lines.join("\n")
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
@@ -32,7 +60,7 @@ proc setOpc*(buf: var openArray[uint8|char], pos: int, opc: uint16) {.inline.} =
 #
 # ------------------------------------------------------------------------------
 proc getOpc*(buf: openArray[uint8|char]|string, pos: int = 0): uint16 {.inline.} =
-  result = (buf[0].uint16 shl 8) or buf[1].uint16
+  result = (buf[pos].uint16 shl 8) or buf[pos + 1].uint16
 
 # ------------------------------------------------------------------------------
 #
@@ -45,7 +73,7 @@ proc setLe16*(buf: var openArray[uint8|char], pos: int, val: uint16) {.inline.} 
 #
 # ------------------------------------------------------------------------------
 proc getLe16*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
-  result = (buf[1].uint16 shl 8) or buf[0].uint16
+  result = (buf[pos + 1].uint16 shl 8) or buf[pos].uint16
 
 # ------------------------------------------------------------------------------
 #
@@ -117,9 +145,36 @@ proc bdAddr2string*(x: uint64): string =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc string2bdAddr*(x: string): Option[uint64] =
+  var address: uint64
+  try:
+    let buf = x.split(":").mapIt(it.parseHexInt)
+    if buf.len != 6:
+      return
+    for idx, octet in buf.pairs:
+      address = address or (octet.uint64 shl ((5 - idx) * 8))
+    result = some(address)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! string2bdAddr: caught exception, \"{err}\"."
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc checkPayloadLen*(procName: string, payload: string, length: int): bool =
   if payload.len != length:
     let errmsg = &"! {procName}: payload length error, {payload.len} [bytes]"
     syslog.error(errmsg)
   else:
     result = true
+
+
+when isMainModule:
+  let bdaddrStr = "01:23:45:67:89:AB"
+  let bdaddr = bdaddrStr.string2bdAddr()
+  if bdaddr.isSome:
+    echo &"{bdaddr.get():012X}"
+  let s = "\x40\xb8\xfb\xff\x00\x00\x00\x00"
+  let e = s.getLeInt16(2)
+  echo e
