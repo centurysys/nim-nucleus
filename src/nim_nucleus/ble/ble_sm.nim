@@ -53,7 +53,7 @@ proc setLocalDeviceKeyReq*(self: BleClient, irk: array[16, uint8],
 # ------------------------------------------------------------------------------
 # 1.3.7 LE リモート Collection Key 設定要求
 # ------------------------------------------------------------------------------
-proc setRemoteCollectionKeyReq*(self: BleClient, keys: RemoteCollectionKey):
+proc setRemoteCollectionKeyReq*(self: BleClient, keys: RemoteCollectionKeys):
     Future[bool] {.async.} =
   const
     procName = "setRemoteCollectionKeyReq"
@@ -61,8 +61,8 @@ proc setRemoteCollectionKeyReq*(self: BleClient, keys: RemoteCollectionKey):
     expOpc = BTM_D_OPC_BLE_SM_REMOTE_COLLECTION_KEY_SET_RSP
   var buf: array[70, uint8]
   buf.setOpc(0, reqOpc)
-  buf[2] = keys.addrType.uint8
-  buf.setBdAddr(3, keys.peerAddr)
+  buf[2] = keys.peer.addrType.uint8
+  buf.setBdAddr(3, keys.peer.address)
   buf[9] = keys.auth.uint8
   buf[10] = keys.encKeySize
   buf.setLeArray(11, keys.irk, 16)

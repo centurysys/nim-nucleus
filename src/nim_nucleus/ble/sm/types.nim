@@ -29,12 +29,16 @@ type
     Completed = (0x01, "Authorization completed")
 
 type
-  PeerAddr* = object
-    addrType*: AddrType
-    address*: uint64
-  LocalAddr* = object
-    addrType*: AddrType
-    address*: uint64
+  RemoteCollectionKeys* = object
+    peer*: PeerAddr
+    auth*: Authentication
+    encKeySize*: uint8
+    irk*: array[16, uint8]
+    ltk*: array[16, uint8]
+    csrk*: array[16, uint8]
+    rand*: array[8, uint8]
+    ediv*: uint16
+    authorized*: bool
 
 # Event
 type
