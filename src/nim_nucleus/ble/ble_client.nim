@@ -11,6 +11,7 @@ import ./basic/types
 import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
+import ./sm/types
 import ./util
 export opc
 export asyncsync

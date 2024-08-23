@@ -10,7 +10,6 @@ import ./core/gatt_result
 import ./gatt/requests
 import ./gatt/types
 import ./util
-import ../lib/asyncsync
 import ../lib/syslog
 export types
 
