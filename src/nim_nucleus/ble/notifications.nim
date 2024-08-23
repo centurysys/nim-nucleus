@@ -17,6 +17,9 @@ type
     of BTM_D_OPC_BLE_GAP_ADVERTISING_REPORT_EVT:
       # LE Advertising Report 通知 (0x4017)
       advData*: AdvertisingReport
+    of BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT:
+      # LE Enhanced Connection Complete 通知 (0x419F)
+      leConData*: ConnectionCompleteEvent
     of BTM_D_OPC_BLE_GAP_DISCONNECTION_COMPLETE_EVT:
       # LE Disconnection Complete 通知 (0x401B)
       leDisconData*: DisconnectionCompleteEvent
@@ -28,7 +31,7 @@ type
       leEncryptionChangeData*: EncryptionChangeEvent
     of BTM_D_OPC_BLE_GAP_ENHANCED_CONNECTION_COMPLETE_EVT:
       # LE Enhanced Connection Complete 通知 (0x419F)
-      leConData*: EnhConnectionCompleteEvent
+      leEnhConData*: EnhConnectionCompleteEvent
     of BTM_D_OPC_BLE_GAP_CHANNEL_SELECTION_ALGORITHM_EVT:
       # LE Channel Selection Algorithm 通知 (0x41BE)
       leChanAlgData*: ChannelSelAlgorithmReport
@@ -93,6 +96,11 @@ proc parseEvent*(payload: string): Option[Notification] =
     if data.isSome:
       let res = Notification(opc: opc, advData: data.get(), valid: true)
       result = some(res)
+  of BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT:
+    let data = payload.parseConnectionComplete()
+    if data.isSome:
+      let res = Notification(opc: opc, leConData: data.get(), valid: true)
+      result = some(res)
   of BTM_D_OPC_BLE_GAP_DISCONNECTION_COMPLETE_EVT:
     let data = payload.parseDisconnectionComplete()
     if data.isSome:
@@ -111,7 +119,7 @@ proc parseEvent*(payload: string): Option[Notification] =
   of BTM_D_OPC_BLE_GAP_ENHANCED_CONNECTION_COMPLETE_EVT:
     let data = payload.parseEnhConnectionComplete()
     if data.isSome:
-      let res = Notification(opc: opc, leConData: data.get(), valid: true)
+      let res = Notification(opc: opc, leEnhConData: data.get(), valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_GAP_CHANNEL_SELECTION_ALGORITHM_EVT:
     let data = payload.parseChannelSelAlgorithm()
