@@ -78,6 +78,16 @@ type
     name*: Option[string]
     data*: string
     rssi*: int8
+  # 1.2.16 LE Connection Complete 通知 (0x4019)
+  ConnectionCompleteEvent* = object
+    hciStatus*: HciStatus
+    conHandle*: uint16
+    role*: Role
+    peer*: PeerAddr
+    conInterval*: uint16
+    conLatency*: uint16
+    supervisionTImeout*: uint16
+    masterClockAccuracy*: ClockAccuracy
   # 1.2.19 LE Disconnection Complete 通知 (0x401b)
   DisconnectionCompleteEvent* = object
     hciStatus*: HciStatus

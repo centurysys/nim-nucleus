@@ -36,6 +36,30 @@ proc parseAdvertisingReport*(payload: string): Option[AdvertisingReport] =
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.2.16 LE Connection Complete 通知
+# ------------------------------------------------------------------------------
+proc parseConnectionComplete*(payload: string): Option[ConnectionCompleteEvent] =
+  const procName = "parseConnectionComplete"
+  if not checkPayloadLen(procName, payload, 20):
+    return
+  try:
+    var res: ConnectionCompleteEvent
+    res.hciStatus = payload.getU8(2).toHciStatus
+    res.conHandle = payload.getLe16(3)
+    res.role = payload.getU8(5).Role
+    res.peer.addrType = payload.getU8(6).AddrType
+    res.peer.address = payload.getBdAddr(7)
+    res.conInterval = payload.getLe16(13)
+    res.conLatency = payload.getLe16(15)
+    res.supervisionTimeout = payload.getLe16(17)
+    res.masterClockAccuracy = payload.getU8(19).ClockAccuracy
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.2.19 LE Disconnection Compete 通知
 # ------------------------------------------------------------------------------
 proc parseDisconnectionComplete*(payload: string): Option[DisconnectionCompleteEvent] =
