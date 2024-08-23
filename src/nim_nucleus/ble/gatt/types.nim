@@ -26,8 +26,7 @@ type
   GattConEvent* = object
     common*: GattEventCommon
     attMtu*: uint16
-    peerAddrType*: AddrType
-    peerAddr*: uint64
+    peer*: PeerAddr
     controlRole*: Role
   # 1.4.7 GATT 切断通知
   GattDisconEvent* = object
@@ -42,9 +41,20 @@ type
 
   # 1.5.70 GATT Handle Value 通知
   GattHandleValueEvent* = object
-    gattResult*: uint16
-    gattId*: uint16
-    peerAddrType*: AddrType
-    peerAddr*: uint64
+    common*: GattEventCommon
+    peer*: PeerAddr
     handle*: uint16
     values*: string
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattDefaultConnParams*(): ConnParams =
+  result.scanInterval = 0x0020
+  result.scanWindow = 0x0012
+  result.conIntervalMin = 0x0032
+  result.conIntervalMax = 0x0046
+  result.conLatency = 0
+  result.supervisionTimeout = 0x07d0
+  result.minCeLength = 0
+  result.maxCeLength = 0

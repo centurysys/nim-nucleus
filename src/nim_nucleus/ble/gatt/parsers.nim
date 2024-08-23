@@ -5,6 +5,9 @@ import ../util
 import ../../lib/syslog
 export types
 
+type
+  LengthError* = object of ValueError
+
 # ==============================================================================
 # Event Parsers
 # ==============================================================================
@@ -27,8 +30,8 @@ proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
     var res: GattConEvent
     res.common = payload.parseGattEventCommon()
     res.attMtu = payload.getLe16(6)
-    res.peerAddrType = payload.getU8(8).AddrType
-    res.peerAddr = payload.getBdAddr(9)
+    res.peer.addrType = payload.getU8(8).AddrType
+    res.peer.address = payload.getBdAddr(9)
     res.controlRole = payload.getU8(15).Role
     result = some(res)
   except:
@@ -63,6 +66,33 @@ proc parseGattExchangeMtu*(payload: string): Option[GattExchangeMtuEvent] =
     var res: GattExchangeMtuEvent
     res.common = payload.parseGattEventCommon()
     res.serverMtu = payload.getLe16(6)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.5.70: GATT Handle Values 通知
+# ------------------------------------------------------------------------------
+proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValueEvent] =
+  const procName = "parseGattHandleValuesEvent"
+  if payload.len < 18:
+    let errmsg = &"! {procName}: payload length too short, {payload.len} [bytes]"
+    syslog.error(errmsg)
+    return
+  try:
+    var res: GattHandleValueEvent
+    res.common = payload.parseGattEventCommon()
+    res.peer.addrType = payload.getU8(6).AddrType
+    res.peer.address = payload.getBdAddr(7)
+    res.handle = payload.getLe16(13)
+    let valueLen = payload.getLeInt16(15)
+    if valueLen > 0:
+      if payload.len != valueLen + 17:
+        raise newException(LengthError, "Payload size mismatch")
+      res.values = newString(valueLen)
+      copyMem(addr res.values[0], addr payload[17], valueLen)
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()

@@ -1,5 +1,6 @@
 import std/tables
 import ./types
+export types
 
 type
   # GATT 接続指示
@@ -7,6 +8,14 @@ type
     filterPolicy*: bool
     ownAddrType*: AddrType
     randomAddrType*: RandomAddrType
-    peerAddrType*: AddrType
-    peerAddr*: uint64
+    peer*: PeerAddr
     phys*: Table[PhyKind, ConnParams]
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattDefaultGattConnParams*(): GattConnParams =
+  result.filterPolicy = false
+  result.ownAddrType = AddrType.Public
+  result.randomAddrType = RandomAddrType.NonResolvPrivate
+  result.phys[Phy1M] = gattDefaultConnParams()
