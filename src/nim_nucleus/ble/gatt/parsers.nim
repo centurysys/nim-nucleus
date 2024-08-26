@@ -73,6 +73,91 @@ proc parseGattExchangeMtu*(payload: string): Option[GattExchangeMtuEvent] =
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.5.6: GATT All Primary Services 通知
+# ------------------------------------------------------------------------------
+proc parseGattAllPrimaryServices*(payload: string): Option[GattAllPrimaryServices] =
+  const procName = "parseGattAllPrimaryServices"
+  if not checkPayloadLen(procName, payload, 168):
+    return
+  let common = payload.parseGattEventCommon()
+  if common.gattResult != 0:
+    return
+  var res: GattAllPrimaryServices
+  res.common = common
+  let items = payload.getU8(6).int
+  let uuidType = payload.getU8(7).ServiceUuidType
+  for i in 0 ..< items:
+    let startHandle = payload.getU8(8 + i * 2)
+    let endHandle = payload.getU8(24 + i * 2)
+    case uuidType
+    of Uuid16:
+      let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(40 + i * 16))
+      let svc = PrimaryServices(startHandle: startHandle, endHandle: endHandle,
+          uuid: uuid)
+      res.services.add(svc)
+    of Uuid128:
+      let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(40 + i * 16))
+      let svc = PrimaryServices(startHandle: startHandle, endHandle: endHandle,
+          uuid: uuid)
+      res.services.add(svc)
+    else:
+      discard
+  result = some(res)
+
+# ------------------------------------------------------------------------------
+# 1.5.26: GATT All Charatrerictic Descriptors 通知
+# ------------------------------------------------------------------------------
+proc parseGattAllCharacteristicDescriptors*(payload: string):
+    Option[GattAllCharacteristicDescriptors] =
+  const procName = "parseGattAllCharacteristicDescriptors"
+  if not checkPayloadLen(procName, payload, 1016):
+    return
+  var res: GattAllCharacteristicDescriptors
+  try:
+    let uuidRawVal = payload.getU8(7)
+    if not (uuidRawVal in [Uuid16.uint8, Uuid128.uint8]):
+      raise newException(ValueError, &"Invalid UUID, {uuidRawVal}")
+    let uuidType = uuidRawVal.ServiceUuidType
+    res.common = payload.parseGattEventCommon()
+    let nums = payload.getU8(6).int
+    res.characteristics = newSeq[CharacteristicDescriptor](nums)
+    for i in 0 ..< nums:
+      res.characteristics[i].handle = payload.getU8(8 + i * 2)
+      case uuidType
+      of Uuid16:
+        let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(120 + i * 16))
+        res.characteristics[i].uuid = uuid
+      of Uuid128:
+        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(40 + i * 16))
+        res.characteristics[i].uuid = uuid
+      else:
+        discard
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.5.30: GATT Read Characteristic Vluaes 通知
+# ------------------------------------------------------------------------------
+proc parseGattReadCharacteristicValue*(payload: string):
+    Option[GattReadCharacteristicValueEvent] =
+  const procName = "parseGattReadCharacteristicValue"
+  if not checkPayloadLen(procName, payload, 520):
+    return
+  var res: GattReadCharacteristicValueEvent
+  try:
+    res.common = payload.parseGattEventCommon()
+    let valueLen = payload.getLe16(6).int
+    res.value = newSeq[uint8](valueLen)
+    copyMem(addr res.value[0], addr payload[8], valueLen)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.5.70: GATT Handle Values 通知
 # ------------------------------------------------------------------------------
 proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValueEvent] =

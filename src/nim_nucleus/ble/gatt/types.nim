@@ -1,3 +1,5 @@
+import std/strformat
+import std/strutils
 import ../common/common_types
 import ../gap/types
 export common_types, types
@@ -16,6 +18,25 @@ type
     supervisionTimeout*: uint16
     minCeLength*: uint16
     maxCeLength*: uint16
+  ServiceUuidType* = enum
+    UuidError = (0x00, "???")
+    Uuid16 = (0x01'u8, "UUID16")
+    Uuid128 = (0x02'u8, "UUID128")
+  Uuid* = object
+    case uuidType*: ServiceUuidType
+    of Uuid16:
+      uuid16*: array[4, uint8]
+    of Uuid128:
+      uuid128*: array[16, uint8]
+    else:
+      discard
+  PrimaryServices* = object
+    startHandle*: uint16
+    endHandle*: uint16
+    uuid*: Uuid
+  CharacteristicDescriptor* = object
+    handle*: uint16
+    uuid*: Uuid
 
 # Event (Common)
 type
@@ -34,10 +55,22 @@ type
 
 # Event (Client)
 type
-  # 1.5.3 Gatt Exchange MTU 通知
+  # 1.5.3 GATT Exchange MTU 通知
   GattExchangeMtuEvent* = object
     common*: GattEventCommon
     serverMtu*: uint16
+  # 1.5.6 GATT All Primary Services 通知
+  GattAllPrimaryServices* = object
+    common*: GattEventCommon
+    services*: seq[PrimaryServices]
+  # 1.5.26 GATT All Charatrerictic Descriptors 通知
+  GattAllCharacteristicDescriptors* = object
+    common*: GattEventCommon
+    characteristics*: seq[CharacteristicDescriptor]
+  # 1.5.30 GATT Read Characteristic Value 通知
+  GattReadCharacteristicValueEvent* = object
+    common*: GattEventCommon
+    value*: seq[uint8]
 
   # 1.5.70 GATT Handle Value 通知
   GattHandleValueEvent* = object
@@ -58,3 +91,23 @@ proc gattDefaultConnParams*(): ConnParams =
   result.supervisionTimeout = 0x07d0
   result.minCeLength = 0
   result.maxCeLength = 0
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: Uuid): string =
+  case x.uuidType
+  of Uuid128:
+    var buf = newSeqOfCap[string](5)
+    let u = x.uuid128
+    buf.add(&"{u[15]:02x}{u[14]:02x}{u[13]:02x}{u[12]:02x}")
+    buf.add(&"{u[11]:02x}{u[10]:02x}")
+    buf.add(&"{u[9]:02x}{u[8]:02x}")
+    buf.add(&"{u[7]:02x}{u[6]:02x}")
+    buf.add(&"{u[5]:02x}{u[4]:02x}{u[3]:02x}{u[2]:02x}{u[1]:02x}{u[0]:02x}")
+    result = buf.join("-")
+  of Uuid16:
+    let u = x.uuid16
+    result = &"{u[3]:02x}{u[2]:02x}{u[1]:02x}{u[0]:02x}"
+  else:
+    discard
