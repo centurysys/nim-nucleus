@@ -65,6 +65,40 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
   result = some(res)
 
 # ------------------------------------------------------------------------------
+# 1.5.18: GATT All Characteristics of a Service 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
+    endHandle: uint16): Future[Option[GattAllCharacteristicsOfService]] {.async.} =
+  const
+    insOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_ALL_CHARACTERISTICS_OF_A_SERVICE_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_ALL_CHARACTERISTICS_OF_A_SERVICE_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_ALL_CHARACTERISTICS_OF_A_SERVICE_EVT
+    endOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_ALL_CHARACTERISTICS_OF_A_SERVICE_EVT
+  var buf: array[8, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, startHandle)
+  buf.setLe16(6, endHandle)
+  let confirmed = await self.gattSend(buf.toString, cfmOpc)
+  if not confirmed:
+    return
+  var res: GattAllCharacteristicsOfService
+  while true:
+    let response = await self.waitEvent(timeout = 1000)
+    if response.isNil:
+      return
+    let opc = response.payload.getOpc()
+    case opc
+    of evtOpc:
+      let services_opt = response.payload.parseGattAllCharacteristicOfService()
+      if services_opt.isSome:
+        res.characteristics.add(services_opt.get.characteristics)
+    of endOpc:
+      break
+    else:
+      discard
+  result = some(res)
+
+# ------------------------------------------------------------------------------
 # 1.5.26: GATT All Characteristic Descriptors 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
@@ -91,10 +125,7 @@ proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
     of evtOpc:
       let services_opt = response.payload.parseGattAllCharacteristicDescriptors()
       if services_opt.isSome:
-        echo "** parse Characteristic OK!"
         res.characteristics.add(services_opt.get.characteristics)
-      else:
-        echo "!! parse Characteristic failed."
     of endOpc:
       break
     else:

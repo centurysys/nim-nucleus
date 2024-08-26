@@ -30,9 +30,20 @@ type
       uuid128*: array[16, uint8]
     else:
       discard
+  CharProperties* = enum
+    pRead = (0x02'u8, "Read")
+    pWriteWoResp = (0x04'u8, "Write Without Response")
+    pWrite = (0x08'u8, "Write")
+    pNotify = (0x10'u8, "Notify")
+    pIndicate = (0x20'u8, "Indicate")
   PrimaryServices* = object
     startHandle*: uint16
     endHandle*: uint16
+    uuid*: Uuid
+  CharacteristicsOfService* = object
+    chHandle*: uint16
+    properties*: uint8
+    attrHandle*: uint16
     uuid*: Uuid
   CharacteristicDescriptor* = object
     handle*: uint16
@@ -63,6 +74,10 @@ type
   GattAllPrimaryServices* = object
     common*: GattEventCommon
     services*: seq[PrimaryServices]
+  # 1.5.18 GATT All Characteristics of a Service 通知
+  GattAllCharacteristicsOfService* = object
+    common*: GattEventCommon
+    characteristics*: seq[CharacteristicsOfService]
   # 1.5.26 GATT All Charatrerictic Descriptors 通知
   GattAllCharacteristicDescriptors* = object
     common*: GattEventCommon
@@ -111,3 +126,28 @@ proc `$`*(x: Uuid): string =
     result = &"0000{u[1]:02x}{u[0]:02x}"
   else:
     discard
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: PrimaryServices): string =
+  result = &"attr handle: 0x{x.startHandle:04x}," &
+      &" end grp handle: 0x{x.endHandle:04x}" &
+      &" uuid: {x.uuid}"
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: CharacteristicsOfService): string =
+  var buf = newSeqOfCap[string](4)
+  buf.add(&"handle: 0x{x.chHandle:04x}")
+  buf.add(&"char properties: 0x{x.properties:02x}")
+  buf.add(&"char value handle: 0x{x.attrHandle:04x}")
+  buf.add(&"uuid: {x.uuid}")
+  result = buf.join(", ")
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: CharacteristicDescriptor): string =
+  result = &"handle: 0x{x.handle:04x}, uuid: {x.uuid}"

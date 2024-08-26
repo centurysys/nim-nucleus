@@ -105,7 +105,45 @@ proc parseGattAllPrimaryServices*(payload: string): Option[GattAllPrimaryService
   result = some(res)
 
 # ------------------------------------------------------------------------------
-# 1.5.26: GATT All Charatrerictic Descriptors 通知
+# 1.5.18: GATT All Charatreristic of a Service 通知
+# ------------------------------------------------------------------------------
+proc parseGattAllCharacteristicOfService*(payload: string):
+    Option[GattAllCharacteristicsOfService] =
+  const procName = "parseGattAllCharacteristicOfService"
+  if not checkPayloadLen(procName, payload, 995):
+    return
+  var res: GattAllCharacteristicsOfService
+  try:
+    let uuidRawVal = payload.getU8(7)
+    if not (uuidRawVal in [Uuid16.uint8, Uuid128.uint8]):
+      raise newException(ValueError, &"Invalid UUID, {uuidRawVal}")
+    let uuidType = uuidRawVal.ServiceUuidType
+    res.common = payload.parseGattEventCommon()
+    let nums = payload.getU8(6).int
+    res.characteristics = newSeq[CharacteristicsOfService](nums)
+    for i in 0 ..< nums:
+      var ch: CharacteristicsOfService
+      ch.chHandle = payload.getLe16(8 + i * 2)
+      ch.properties = payload.getU8(102 + i)
+      ch.attrHandle = payload.getLe16(149 + i * 2)
+      case uuidType
+      of Uuid16:
+        let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(243 + i * 16))
+        ch.uuid = uuid
+      of Uuid128:
+        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(243 + i * 16))
+        ch.uuid = uuid
+      else:
+        discard
+      res.characteristics[i] = ch
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+# 1.5.26: GATT All Charatreristic Descriptors 通知
 # ------------------------------------------------------------------------------
 proc parseGattAllCharacteristicDescriptors*(payload: string):
     Option[GattAllCharacteristicDescriptors] =
@@ -128,7 +166,7 @@ proc parseGattAllCharacteristicDescriptors*(payload: string):
         let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(120 + i * 16))
         res.characteristics[i].uuid = uuid
       of Uuid128:
-        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(40 + i * 16))
+        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(120 + i * 16))
         res.characteristics[i].uuid = uuid
       else:
         discard
