@@ -2,7 +2,7 @@ import std/options
 import std/sequtils
 import std/strformat
 import std/strutils
-import ./gatt/types
+import ./common/common_types
 import ../lib/syslog
 
 # ------------------------------------------------------------------------------
@@ -41,13 +41,13 @@ func toString*(buf: openArray[uint8|char]): string =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-func hb(x: uint16): uint8 {.inline.} =
+func hb*(x: uint16): uint8 {.inline.} =
   result = ((x shr 8) and 0xff).uint8
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-func lb(x: uint16): uint8 {.inline.} =
+func lb*(x: uint16): uint8 {.inline.} =
   result = (x and 0xff).uint8
 
 # ------------------------------------------------------------------------------
@@ -159,11 +159,11 @@ func getUuid128*(buf: openArray[uint8|char]|string, pos: int): array[16, uint8] 
 # ------------------------------------------------------------------------------
 proc setUuid16(buf: var openArray[uint8|char], pos: int, uuid16: array[2, uint8])
     {.inline.} =
-  if buf.len < pos + 2:
+  if buf.len < pos + 16:
     raise newException(EOFError, "buffer overflow")
   buf[pos] = Uuid16.uint8
-  for i in 1 .. 2:
-    buf[pos + i] = uuid16[i]
+  for i in 0 ..< 16:
+    buf[pos + 1 + i] = if i < 2: uuid16[i] else: 0x00'u8
 
 # ------------------------------------------------------------------------------
 #
@@ -173,8 +173,8 @@ proc setUuid128(buf: var openArray[uint8|char], pos: int, uuid128: array[16, uin
   if buf.len < pos + 16:
     raise newException(EOFError, "buffer overflow")
   buf[pos] = Uuid128.uint8
-  for i in 1 .. 16:
-    buf[pos + i] = uuid128[i]
+  for i in 0 ..< 16:
+    buf[pos + 1 + i] = uuid128[i]
 
 # ------------------------------------------------------------------------------
 #

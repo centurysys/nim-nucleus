@@ -1,7 +1,9 @@
+import std/options
 import std/strformat
 import std/strutils
 import ../common/common_types
 import ../gap/types
+import ../util
 export common_types, types
 
 type
@@ -18,18 +20,6 @@ type
     supervisionTimeout*: uint16
     minCeLength*: uint16
     maxCeLength*: uint16
-  ServiceUuidType* = enum
-    UuidError = (0x00, "???")
-    Uuid16 = (0x01'u8, "UUID16")
-    Uuid128 = (0x02'u8, "UUID128")
-  Uuid* = object
-    case uuidType*: ServiceUuidType
-    of Uuid16:
-      uuid16*: array[2, uint8]
-    of Uuid128:
-      uuid128*: array[16, uint8]
-    else:
-      discard
   CharProperties* = enum
     pRead = (0x02'u8, "Read")
     pWriteWoResp = (0x04'u8, "Write Without Response")
@@ -75,7 +65,7 @@ type
     common*: GattEventCommon
     services*: seq[PrimaryServices]
   # 1.5.18 GATT All Characteristics of a Service 通知
-  GattAllCharacteristicsOfService* = object
+  GattCharacteristicsOfService* = object
     common*: GattEventCommon
     characteristics*: seq[CharacteristicsOfService]
   # 1.5.26 GATT All Charatrerictic Descriptors 通知
@@ -110,41 +100,6 @@ proc gattDefaultConnParams*(): ConnParams =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc toUuid128*(x: Uuid): Uuid =
-  if x.uuidType == Uuid16:
-    var uuid128: array[16, uint8] = [
-      0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80,
-      0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    ]
-    uuid128[12] = x.uuid16[0]
-    uuid128[13] = x.uuid16[1]
-    result = Uuid(uuidType: Uuid128, uuid128: uuid128)
-  else:
-    result = x
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc `$`*(x: Uuid): string =
-  case x.uuidType
-  of Uuid128:
-    var buf = newSeqOfCap[string](5)
-    let u = x.uuid128
-    buf.add(&"{u[15]:02x}{u[14]:02x}{u[13]:02x}{u[12]:02x}")
-    buf.add(&"{u[11]:02x}{u[10]:02x}")
-    buf.add(&"{u[9]:02x}{u[8]:02x}")
-    buf.add(&"{u[7]:02x}{u[6]:02x}")
-    buf.add(&"{u[5]:02x}{u[4]:02x}{u[3]:02x}{u[2]:02x}{u[1]:02x}{u[0]:02x}")
-    result = buf.join("-")
-  of Uuid16:
-    let u = x.uuid16
-    result = &"0000{u[1]:02x}{u[0]:02x}"
-  else:
-    discard
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
 proc `$`*(x: PrimaryServices): string =
   result = &"attr handle: 0x{x.startHandle:04x}," &
       &" end grp handle: 0x{x.endHandle:04x}" &
@@ -171,3 +126,8 @@ proc `$`*(x: CharacteristicDescriptor): string =
 when isMainModule:
   let uuid = Uuid(uuidType: Uuid16, uuid16: [0x00, 0x2a])
   echo uuid.toUuid128
+  for uuidStr in ["00002a19-0000-1000-8000-00805f9b34fb", "2a10"]:
+    let uuid = uuidStr.str2uuid()
+    echo &"* {uuidStr} --> {uuid}"
+    if uuid.isSome:
+      echo uuid.get.toUuid128
