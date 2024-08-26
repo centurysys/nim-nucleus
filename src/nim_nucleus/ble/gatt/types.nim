@@ -110,6 +110,21 @@ proc gattDefaultConnParams*(): ConnParams =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc toUuid128*(x: Uuid): Uuid =
+  if x.uuidType == Uuid16:
+    var uuid128: array[16, uint8] = [
+      0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80,
+      0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ]
+    uuid128[12] = x.uuid16[0]
+    uuid128[13] = x.uuid16[1]
+    result = Uuid(uuidType: Uuid128, uuid128: uuid128)
+  else:
+    result = x
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc `$`*(x: Uuid): string =
   case x.uuidType
   of Uuid128:
@@ -133,7 +148,7 @@ proc `$`*(x: Uuid): string =
 proc `$`*(x: PrimaryServices): string =
   result = &"attr handle: 0x{x.startHandle:04x}," &
       &" end grp handle: 0x{x.endHandle:04x}" &
-      &" uuid: {x.uuid}"
+      &" uuid: {x.uuid.toUuid128}"
 
 # ------------------------------------------------------------------------------
 #
@@ -143,11 +158,16 @@ proc `$`*(x: CharacteristicsOfService): string =
   buf.add(&"handle: 0x{x.chHandle:04x}")
   buf.add(&"char properties: 0x{x.properties:02x}")
   buf.add(&"char value handle: 0x{x.attrHandle:04x}")
-  buf.add(&"uuid: {x.uuid}")
+  buf.add(&"uuid: {x.uuid.toUuid128}")
   result = buf.join(", ")
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
 proc `$`*(x: CharacteristicDescriptor): string =
-  result = &"handle: 0x{x.handle:04x}, uuid: {x.uuid}"
+  result = &"handle: 0x{x.handle:04x}, uuid: {x.uuid.toUuid128}"
+
+
+when isMainModule:
+  let uuid = Uuid(uuidType: Uuid16, uuid16: [0x00, 0x2a])
+  echo uuid.toUuid128
