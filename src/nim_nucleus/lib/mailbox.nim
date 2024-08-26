@@ -5,6 +5,7 @@ import ./asyncsync
 type
   MailboxObj[T] = object of RootObj
     queue: AsyncQueue[T]
+    fut: Future[T]
   Mailbox*[T] = ref MailboxObj[T]
 
 # ------------------------------------------------------------------------------
@@ -17,7 +18,25 @@ proc newMailbox*[T](queuelen: int): Mailbox[T] =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc full*[T](self: Mailbox[T]): bool {.inline.} =
+  result = self.queue.full()
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc empty*[T](self: Mailbox[T]): bool {.inline.} =
+  result = self.queue.empty()
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc send*[T](self: Mailbox[T], data: T) {.async.} =
+  await self.queue.put(data)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc put*[T](self: Mailbox[T], data: T) {.async.} =
   await self.queue.put(data)
 
 # ------------------------------------------------------------------------------
@@ -31,18 +50,29 @@ proc sendNoWait*[T](self: Mailbox[T], data: T): bool =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc receive*[T](self: Mailbox[T], timeout: uint = 0): Future[Option[T]] {.async.} =
-  let fut = self.queue.get()
+proc putNoWait*[T](self: Mailbox[T], data: T): bool =
+  result = self.sendNoWait(data)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc receive*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.} =
+  if self.fut.isNil:
+    self.fut = self.queue.get()
   var res: T
   if timeout > 0:
-    let received = await withTimeout(fut, timeout.int)
+    let received = await withTimeout(self.fut, timeout.int)
     if not received:
-      let dummy = new T
-      await self.queue.put(dummy[])
-      discard await fut
       return
     else:
-      res = fut.read()
+      res = self.fut.read()
   else:
-    res = await fut
+    res = await self.fut
+  self.fut = nil
   result = some(res)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc get*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.} =
+  result = await self.receive(timeout)

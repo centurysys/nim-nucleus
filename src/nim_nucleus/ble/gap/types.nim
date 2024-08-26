@@ -100,6 +100,11 @@ type
     conInterval*: uint16
     conLatency*: uint16
     supervisionTImeout*: uint16
+  # 1.2.35 LE Remote Used Features 通知 (0x4035)
+  RemoteUsedFeatures* = object
+    hciStatus*: HciStatus
+    conHandle*: uint16
+    features*: uint64
   # 1.2.36 LE Encryption Change 通知 (0x4037)
   EncryptionChangeEvent* = object
     hciStatus*: HciStatus

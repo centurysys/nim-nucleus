@@ -2,6 +2,7 @@ import std/options
 import std/sequtils
 import std/strformat
 import std/strutils
+import ./gatt/types
 import ../lib/syslog
 
 # ------------------------------------------------------------------------------
@@ -33,7 +34,7 @@ proc hexDump*(x: string): string =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc toString*(buf: openArray[uint8|char]): string =
+func toString*(buf: openArray[uint8|char]): string =
   result = newString(buf.len)
   copyMem(addr result[0], addr buf[0], buf.len)
 
@@ -59,8 +60,15 @@ proc setOpc*(buf: var openArray[uint8|char], pos: int, opc: uint16) {.inline.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getOpc*(buf: openArray[uint8|char]|string, pos: int = 0): uint16 {.inline.} =
+func getOpc*(buf: openArray[uint8|char]|string, pos: int = 0): uint16 {.inline.} =
   result = (buf[pos].uint16 shl 8) or buf[pos + 1].uint16
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+func getLe64*(buf: openArray[uint8|char]|string, pos: int): uint64 {.inline.} =
+  for idx in 0 ..< 8:
+    result = result or (buf[pos + idx].uint64 shl (idx * 8))
 
 # ------------------------------------------------------------------------------
 #
@@ -72,25 +80,25 @@ proc setLe16*(buf: var openArray[uint8|char], pos: int, val: uint16) {.inline.} 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getLe16*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
+func getLe16*(buf: openArray[uint8|char]|string, pos: int): uint16 {.inline.} =
   result = (buf[pos + 1].uint16 shl 8) or buf[pos].uint16
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getLeInt16*(buf: openArray[uint8|char]|string, pos: int): int16 {.inline.} =
+func getLeInt16*(buf: openArray[uint8|char]|string, pos: int): int16 {.inline.} =
   result = cast[int16](getLe16(buf, pos))
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getU8*(buf: openArray[uint8|char]|string, pos: int): uint8 {.inline.} =
+func getU8*(buf: openArray[uint8|char]|string, pos: int): uint8 {.inline.} =
   result = cast[uint8](buf[pos])
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getS8*(buf: openArray[uint8|char]|string, pos: int): int8 {.inline.} =
+func getS8*(buf: openArray[uint8|char]|string, pos: int): int8 {.inline.} =
   result = cast[int8](buf[pos])
 
 # ------------------------------------------------------------------------------
@@ -104,7 +112,7 @@ proc setBdAddr*(buf: var openArray[uint8|char], pos: int, bdAddr: uint64) =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc getBdAddr*(buf: openArray[uint8|char]|string, pos: int): uint64 =
+func getBdAddr*(buf: openArray[uint8|char]|string, pos: int): uint64 =
   for idx in 0 ..< 6:
     result = result or (buf[pos + idx].uint64 shl (idx * 8))
 
@@ -131,6 +139,56 @@ proc getLeArray*(src: openArray[uint8|char]|string, dest: var openArray[uint8],
     pos: int, len: int) =
   for idx in 0 ..< len:
     dest[idx] = src[pos + idx].uint8
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+func getUuid16*(buf: openArray[uint8|char]|string, pos: int): array[4, uint8] =
+  for i in 0 ..< 4:
+    result[i] = buf.getU8(pos + i)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+func getUuid128*(buf: openArray[uint8|char]|string, pos: int): array[16, uint8] =
+  for i in 0 ..< 16:
+    result[i] = buf.getU8(pos + i)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc setUuid16(buf: var openArray[uint8|char], pos: int, uuid16: array[4, uint8])
+    {.inline.} =
+  if buf.len < pos + 4:
+    raise newException(EOFError, "buffer overflow")
+  buf[pos] = Uuid16.uint8
+  for i in 1 .. 4:
+    buf[pos + i] = uuid16[i]
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc setUuid128(buf: var openArray[uint8|char], pos: int, uuid128: array[16, uint8])
+    {.inline.} =
+  if buf.len < pos + 16:
+    raise newException(EOFError, "buffer overflow")
+  buf[pos] = Uuid128.uint8
+  for i in 1 .. 16:
+    buf[pos + i] = uuid128[i]
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc setUuid*(buf: var openArray[uint8|char], pos: int, uuid: Uuid) =
+  if pos < 0:
+    raise newException(IndexDefect, "position must be 0 or above.")
+  case uuid.uuidType
+  of Uuid16:
+    buf.setUuid16(pos, uuid.uuid16)
+  of Uuid128:
+    buf.setUuid128(pos, uuid.uuid128)
+  else:
+    discard
 
 # ------------------------------------------------------------------------------
 #

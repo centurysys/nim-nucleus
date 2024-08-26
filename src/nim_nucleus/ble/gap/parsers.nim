@@ -98,6 +98,24 @@ proc parseConnectionUpdate*(payload: string): Option[ConnectionUpdateEvent] =
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.2.35 LE Read Remote Used Features 通知
+# ------------------------------------------------------------------------------
+proc parseRemoteUsedFeatures*(payload: string): Option[RemoteUsedFeatures] =
+  const procName = "parseRemoteUsedFeatures"
+  if not checkPayloadLen(procName, payload, 13):
+    return
+  try:
+    var res: RemoteUsedFeatures
+    res.hciStatus = payload.getU8(2).toHciStatus
+    res.conHandle = payload.getLe16(3)
+    res.features = payload.getLe64(5)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.2.36 LE Encryption Change 通知
 # ------------------------------------------------------------------------------
 proc parseEncryptionChange*(payload: string): Option[EncryptionChangeEvent] =
