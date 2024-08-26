@@ -26,6 +26,9 @@ type
     of BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_EVT:
       # LE Connection Update 通知 (0x4032)
       leConUpdateData*: ConnectionUpdateEvent
+    of BTM_D_OPC_BLE_GAP_READ_REMOTE_USED_FEATURES_EVT:
+      # LE Read Remote Used Features 通知 (0x4035)
+      leRemoteUsedFeaturesData*: RemoteUsedFeatures
     of BTM_D_OPC_BLE_GAP_ENCRYPTION_CHANGE_EVT:
       # LE Encryption Change 通知 (0x4037)
       leEncryptionChangeData*: EncryptionChangeEvent
@@ -110,6 +113,13 @@ proc parseEvent*(payload: string): Option[Notification] =
     let data = payload.parseConnectionUpdate()
     if data.isSome:
       let res = Notification(opc: opc, leConUpdateData: data.get(), valid: true)
+      result = some(res)
+  of BTM_D_OPC_BLE_GAP_READ_REMOTE_USED_FEATURES_EVT:
+    let data = payload.parseRemoteUsedFeatures()
+    if data.isSome:
+      # LE Read Remote Used Features 通知 (0x4035)
+      let res = Notification(opc: opc, leRemoteUsedFeaturesData: data.get(),
+          valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_GAP_ENCRYPTION_CHANGE_EVT:
     let data = payload.parseEncryptionChange()
