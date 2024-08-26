@@ -65,10 +65,10 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
   result = some(res)
 
 # ------------------------------------------------------------------------------
-# 1.5.18: GATT All Characteristics of a Service 指示->確認->通知
+# 1.5.16: GATT All Characteristics of a Service 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
-    endHandle: uint16): Future[Option[GattAllCharacteristicsOfService]] {.async.} =
+    endHandle: uint16): Future[Option[GattCharacteristicsOfService]] {.async.} =
   const
     insOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_ALL_CHARACTERISTICS_OF_A_SERVICE_INS
     cfmOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_ALL_CHARACTERISTICS_OF_A_SERVICE_CFM
@@ -81,7 +81,7 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
   let confirmed = await self.gattSend(buf.toString, cfmOpc)
   if not confirmed:
     return
-  var res: GattAllCharacteristicsOfService
+  var res: GattCharacteristicsOfService
   while true:
     let response = await self.waitEvent(timeout = 1000)
     if response.isNil:
@@ -89,7 +89,7 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
-      let services_opt = response.payload.parseGattAllCharacteristicOfService()
+      let services_opt = response.payload.parseGattCharacteristicOfService()
       if services_opt.isSome:
         res.characteristics.add(services_opt.get.characteristics)
     of endOpc:
@@ -99,7 +99,42 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
   result = some(res)
 
 # ------------------------------------------------------------------------------
-# 1.5.26: GATT All Characteristic Descriptors 指示->確認->通知
+# 1.5.20: GATT Discover Characteristics by UUID 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattDiscoverCharacteristicsByUuid*(self: GattClient, startHandle: uint16,
+    endHandle: uint16, uuid: Uuid): Future[Option[GattCharacteristicsOfService]] {.async.} =
+  const
+    insOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_CHARACTERISTICS_BY_UUID_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_CHARACTERISTICS_BY_UUID_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_CHARACTERISTICS_BY_UUID_EVT
+    endOpc = BTM_D_OPC_BLE_GATT_C_DISCOVER_CHARACTERISTICS_BY_UUID_EVT
+  var buf: array[25, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, startHandle)
+  buf.setLe16(6, endHandle)
+  buf.setUuid(8, uuid)
+  let confirmed = await self.gattSend(buf.toString, cfmOpc)
+  if not confirmed:
+    return
+  var res: GattCharacteristicsOfService
+  while true:
+    let response = await self.waitEvent(timeout = 1000)
+    if response.isNil:
+      return
+    let opc = response.payload.getOpc()
+    case opc
+    of evtOpc:
+      let services_opt = response.payload.parseGattCharacteristicOfService()
+      if services_opt.isSome:
+        res.characteristics.add(services_opt.get.characteristics)
+    of endOpc:
+      break
+    else:
+      discard
+  result = some(res)
+
+# ------------------------------------------------------------------------------
+# 1.5.24: GATT All Characteristic Descriptors 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
     endHandle: uint16): Future[Option[GattAllCharacteristicDescriptors]] {.async.} =

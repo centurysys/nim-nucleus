@@ -107,12 +107,12 @@ proc parseGattAllPrimaryServices*(payload: string): Option[GattAllPrimaryService
 # ------------------------------------------------------------------------------
 # 1.5.18: GATT All Charatreristic of a Service 通知
 # ------------------------------------------------------------------------------
-proc parseGattAllCharacteristicOfService*(payload: string):
-    Option[GattAllCharacteristicsOfService] =
-  const procName = "parseGattAllCharacteristicOfService"
+proc parseGattCharacteristicOfService*(payload: string):
+    Option[GattCharacteristicsOfService] =
+  const procName = "parseGattCharacteristicOfService"
   if not checkPayloadLen(procName, payload, 995):
     return
-  var res: GattAllCharacteristicsOfService
+  var res: GattCharacteristicsOfService
   try:
     let uuidRawVal = payload.getU8(7)
     if not (uuidRawVal in [Uuid16.uint8, Uuid128.uint8]):
