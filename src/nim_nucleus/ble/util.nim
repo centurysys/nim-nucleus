@@ -143,8 +143,8 @@ proc getLeArray*(src: openArray[uint8|char]|string, dest: var openArray[uint8],
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-func getUuid16*(buf: openArray[uint8|char]|string, pos: int): array[4, uint8] =
-  for i in 0 ..< 4:
+func getUuid16*(buf: openArray[uint8|char]|string, pos: int): array[2, uint8] =
+  for i in 0 ..< 2:
     result[i] = buf.getU8(pos + i)
 
 # ------------------------------------------------------------------------------
@@ -157,12 +157,12 @@ func getUuid128*(buf: openArray[uint8|char]|string, pos: int): array[16, uint8] 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc setUuid16(buf: var openArray[uint8|char], pos: int, uuid16: array[4, uint8])
+proc setUuid16(buf: var openArray[uint8|char], pos: int, uuid16: array[2, uint8])
     {.inline.} =
-  if buf.len < pos + 4:
+  if buf.len < pos + 2:
     raise newException(EOFError, "buffer overflow")
   buf[pos] = Uuid16.uint8
-  for i in 1 .. 4:
+  for i in 1 .. 2:
     buf[pos + i] = uuid16[i]
 
 # ------------------------------------------------------------------------------

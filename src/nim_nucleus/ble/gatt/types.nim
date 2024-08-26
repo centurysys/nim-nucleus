@@ -25,7 +25,7 @@ type
   Uuid* = object
     case uuidType*: ServiceUuidType
     of Uuid16:
-      uuid16*: array[4, uint8]
+      uuid16*: array[2, uint8]
     of Uuid128:
       uuid128*: array[16, uint8]
     else:
@@ -108,6 +108,6 @@ proc `$`*(x: Uuid): string =
     result = buf.join("-")
   of Uuid16:
     let u = x.uuid16
-    result = &"{u[3]:02x}{u[2]:02x}{u[1]:02x}{u[0]:02x}"
+    result = &"0000{u[1]:02x}{u[0]:02x}"
   else:
     discard
