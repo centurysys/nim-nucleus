@@ -3,10 +3,10 @@ import std/options
 import std/strformat
 import std/tables
 import ./ble_client
-import ./ble_gap
 import ./notifications
 import ./core/opc
 import ./core/gatt_result
+import ./core/hci_status
 import ./gatt/requests
 import ./gatt/types
 import ./util
@@ -37,7 +37,7 @@ proc btmInstruction(self: BleClient, procName: string, payload: string,
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-# 1.4.2 GATT 接続指示
+# 1.4.1 GATT 接続指示 (BT4.2)
 # ------------------------------------------------------------------------------
 proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
     Future[Option[int16]] {.async.} =
@@ -66,8 +66,8 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
 # ------------------------------------------------------------------------------
 # 1.4.5 GATT 切断指示
 # ------------------------------------------------------------------------------
-proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[int16]]
-    {.async.} =
+proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16):
+    Future[Option[int16]] {.async.} =
   const
     procName = "gattCommonDisconnectIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_DISCONNECT_INS
@@ -77,6 +77,31 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[in
   buf.setLe16(2, gattId)
   result = await self.btmInstruction(procName, buf.toString, expectedOpc)
 
+# ------------------------------------------------------------------------------
+# 1.4.8 GATT 接続中断指示
+# ------------------------------------------------------------------------------
+proc gattCommonConnectCancelIns*(self: BleClient): Future[bool] {.async.} =
+  const
+    procName = "gattCommonConnectCancelIns"
+    indOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_CANCEL_INS
+    expectedOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_CANCEL_CFM
+  var buf: array[2, uint8]
+  buf.setOpc(0, indOpc)
+  let res_opt = await self.btmSendRecv(buf.toString)
+  if res_opt.isNone:
+    let errmsg = &"! {procName}: failed"
+    syslog.error(errmsg)
+    return
+  let response = res_opt.get()
+  let resOpc = response.getOpc(0)
+  if resOpc != expectedOpc:
+    let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
+    syslog.error(errmsg)
+    return
+  let hciCode = response.getu8(2)
+  self.debugEcho(&"* {procName}: hciCode: {hciCode}")
+  result = hciCode.checkHciStatus(procName)
+
 # ==============================================================================
 # Instruction/Confirm -> Wait Event
 # ==============================================================================
@@ -84,8 +109,8 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16): Future[Option[in
 # ------------------------------------------------------------------------------
 # GATT 接続
 # ------------------------------------------------------------------------------
-proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattClient]]
-    {.async.} =
+proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
+    Future[Option[GattClient]] {.async.} =
   const procName = "gattConnect"
   let gattRes_opt = await self.gattCommonConnectIns(params)
   if gattRes_opt.isNone:
@@ -104,8 +129,13 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
     BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT,
   ]
   while true:
-    let payload = await self.waitAppEvent(waitingEvents)
-    let msg_opt = payload.parseEvent()
+    let payload_opt = await self.waitAppEvent(waitingEvents, timeout)
+    if payload_opt.isNone:
+      # timeouted
+      syslog.error(&"! {procName}: GATT connection timeouted.")
+      discard await self.gattCommonConnectCancelIns()
+      break
+    let msg_opt = payload_opt.get.parseEvent()
     if msg_opt.isNone:
       continue
     let msg = msg_opt.get()
@@ -125,10 +155,19 @@ proc gattConnect*(self: BleClient, params: GattConnParams): Future[Option[GattCl
       discard
     if gattId.isSome and conHandle.isSome:
       # 2つの通知受信完了
-      let client = new GattClient
-      client.ble = addr self
-      client.gattId = gattId.get()
-      client.conHandle = conHandle.get()
-      result = some(client)
+      let client_opt = self.newGattClient(gattId.get, conhandle.get)
+      if client_opt.isSome:
+        let client = client_opt.get()
+        result = some(client)
       break
   discard await self.waitAppEvent(@[])
+
+# ------------------------------------------------------------------------------
+# Disconnect
+# ------------------------------------------------------------------------------
+proc disconnect*(self: GattClient): Future[bool] {.async.} =
+  let gattId = self.gattId
+  let res_opt = await self.bleClient.gattCommonDisconnectIns(gattId)
+  if res_opt.isNone:
+    return
+  result = self.bleClient.deregister(self)
