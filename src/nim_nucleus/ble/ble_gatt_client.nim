@@ -121,7 +121,7 @@ proc gattDiscoverCharacteristicsByUuid*(self: GattClient, startHandle: uint16,
   while true:
     let response = await self.waitEvent(timeout = 1000)
     if response.isNil:
-      return
+      break
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -193,7 +193,7 @@ proc gattReadCharacteristicValue*(self: GattClient, handle: uint16):
 # 1.5.52: GATT Write Characteristic Value 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
-    value: openArray[uint8|char]|string): Future[bool] {.async.} =
+    value: seq[uint8|char]|string): Future[bool] {.async.} =
   const
     procName = "gattWriteCharacteristicValue"
     insOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_VALUE_INS
@@ -213,3 +213,25 @@ proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
     logGattResult(procName, res.gattResult, detail = true)
   else:
     result = true
+
+# ==============================================================================
+# Helper functions
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
+    value: uint16): Future[bool] {.async.} =
+  var buf = newSeq[uint8](2)
+  buf.setLe16(0, value)
+  result = await self.gattWriteCharacteristicValue(handle, buf)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
+    value: uint8): Future[bool] {.async.} =
+  var buf = newSeq[uint8](1)
+  buf[0] = value
+  result = await self.gattWriteCharacteristicValue(handle, buf)
