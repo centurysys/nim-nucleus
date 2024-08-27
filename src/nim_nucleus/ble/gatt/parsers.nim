@@ -190,6 +190,7 @@ proc parseGattReadCharacteristicValue*(payload: string):
     let valueLen = payload.getLe16(6).int
     res.value = newSeq[uint8](valueLen)
     copyMem(addr res.value[0], addr payload[8], valueLen)
+    result = some(res)
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"

@@ -1,9 +1,7 @@
-import std/options
 import std/strformat
 import std/strutils
 import ../common/common_types
 import ../gap/types
-import ../util
 export common_types, types
 
 type
@@ -124,6 +122,8 @@ proc `$`*(x: CharacteristicDescriptor): string =
 
 
 when isMainModule:
+  import std/options
+
   let uuid = Uuid(uuidType: Uuid16, uuid16: [0x00, 0x2a])
   echo uuid.toUuid128
   for uuidStr in ["00002a19-0000-1000-8000-00805f9b34fb", "2a10"]:
