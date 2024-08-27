@@ -124,14 +124,14 @@ proc parseGattCharacteristicOfService*(payload: string):
     for i in 0 ..< nums:
       var ch: CharacteristicsOfService
       ch.chHandle = payload.getLe16(8 + i * 2)
-      ch.properties = payload.getU8(102 + i)
-      ch.attrHandle = payload.getLe16(149 + i * 2)
+      ch.properties = payload.getU8(100 + i)
+      ch.attrHandle = payload.getLe16(146 + i * 2)
       case uuidType
       of Uuid16:
-        let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(243 + i * 16))
+        let uuid = Uuid(uuidType: uuidType, uuid16: payload.getUuid16(238 + i * 16))
         ch.uuid = uuid
       of Uuid128:
-        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(243 + i * 16))
+        let uuid = Uuid(uuidType: uuidType, uuid128: payload.getUuid128(238 + i * 16))
         ch.uuid = uuid
       else:
         discard
@@ -201,7 +201,7 @@ proc parseGattReadCharacteristicValue*(payload: string):
 # ------------------------------------------------------------------------------
 proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValue] =
   const procName = "parseGattHandleValuesEvent"
-  if payload.len < 18:
+  if payload.len != 529:
     let errmsg = &"! {procName}: payload length too short, {payload.len} [bytes]"
     syslog.error(errmsg)
     return
@@ -213,8 +213,8 @@ proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValue] =
     res.handle = payload.getLe16(13)
     let valueLen = payload.getLeInt16(15)
     if valueLen > 0:
-      if payload.len != valueLen + 17:
-        raise newException(LengthError, "Payload size mismatch")
+      if payload.len < valueLen + 17:
+        raise newException(LengthError, "Value size too big")
       res.values = newString(valueLen)
       copyMem(addr res.values[0], addr payload[17], valueLen)
     result = some(res)
