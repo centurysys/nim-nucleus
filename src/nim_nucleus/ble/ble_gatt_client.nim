@@ -188,3 +188,28 @@ proc gattReadCharacteristicValue*(self: GattClient, handle: uint16):
   if res_opt.isNone:
     return
   result = some(res_opt.get.value)
+
+# ------------------------------------------------------------------------------
+# 1.5.52: GATT Write Characteristic Value 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
+    value: openArray[uint8|char]|string): Future[bool] {.async.} =
+  const
+    procName = "gattWriteCharacteristicValue"
+    insOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_VALUE_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_VALUE_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_VALUE_EVT
+  var buf: array[520, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, handle)
+  buf.setLe16(6, value.len.uint16)
+  copyMem(addr buf[8], addr value[0], value.len)
+  let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if resp_opt.isNone:
+    return
+  let response = resp_opt.get()
+  let res = response.parseGattEventCommon()
+  if res.gattResult != 0:
+    logGattResult(procName, res.gattResult, detail = true)
+  else:
+    result = true
