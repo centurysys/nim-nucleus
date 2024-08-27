@@ -1,10 +1,14 @@
 import std/asyncdispatch
+import std/options
+import std/strformat
 import ./ble_client
+import ./core/hci_status
 import ./core/opc
 import ./sm/types
 import ./sm/requests
 import ./sm/parsers
 import ./util
+import ../lib/syslog
 export types
 
 # ------------------------------------------------------------------------------
@@ -88,9 +92,36 @@ proc deleteRemoteDeviceKeyReq*(self: BleClient, device: RemoteDevice):
   buf.setBdAddr(3, device.bdAddr)
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
+# ------------------------------------------------------------------------------
+# 1.3.35 LE ペアリング指示
+# ------------------------------------------------------------------------------
+proc pairingReq*(self: BleClient, gattId: uint16): Future[bool] {.async.} =
+  const
+    procName = "pairingReq"
+    reqOpc = BTM_D_OPC_BLE_SM_PAIRING_INS
+    expOpc = BTM_D_OPC_BLE_SM_PAIRING_INS
+  var buf: array[4, uint8]
+  buf.setOpc(0, reqOpc)
+  buf.setLe16(2, gattId)
+  let res_opt = await self.btmSendRecv(buf.toString)
+  if res_opt.isNone:
+    let errmsg = &"! {procName}: failed"
+    syslog.error(errmsg)
+    return
+  let response = res_opt.get()
+  let resOpc = response.getOpc(0)
+  if resOpc != expOpc:
+    let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
+    syslog.error(errmsg)
+    return
+  let hciCode = response.getu8(2)
+  let retGattId = response.getLe16(3)
+  self.debugEcho(&"* {procName}: hciCode: {hciCode}")
+  if hciCode.checkHciStatus(procName) and gattId == retGattId:
+    result = true
+
 
 when isMainmodule:
-  import std/strformat
   import std/strutils
 
   var cmd: array[3, uint8]
