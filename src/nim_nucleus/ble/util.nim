@@ -8,29 +8,32 @@ import ../lib/syslog
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc hexDump*(x: string): string =
-  const LINESZ = 16
+proc hexDump*(x: string, hexAddr = false): string =
+  let linesize = if hexAddr: 16 else: 20
   var
     buf: seq[string]
     lines: seq[string]
-    offsets = newSeqOfCap[string](LINESZ)
-  for i in 0 ..< LINESZ:
-    offsets.add(&"{i:02X}")
+    offsets = newSeqOfCap[string](linesize)
+  for i in 0 ..< linesize:
+    let offsetStr = if hexAddr: &"{i:02x}" else: &"{i:2d}"
+    offsets.add(offsetStr)
   let addrHdr = offsets.join(" ")
   let header = &"\n     | {addrHdr}"
   lines.add(header)
   lines.add("-".repeat(header.len))
   for i, c in x.pairs:
-    let offset = i mod LINESZ
+    let offset = i mod linesize
     if offset == 0:
       buf.setLen(0)
     buf.add(&"{c.uint8:02x}")
-    if (offset == 15) or i == (x.len - 1):
+    if (offset == (linesize - 1)) or i == (x.len - 1):
       let address = i - offset
       let content = buf.join(" ")
-      let line = &"{address:04X} | {content}"
+      let baseAddr = if hexAddr: &"{address:04x}" else: &"{address:4d}"
+      let line = &"{baseAddr} | {content}"
       lines.add(line)
   result = lines.join("\n")
+
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
