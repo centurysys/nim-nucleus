@@ -74,9 +74,8 @@ type
   GattReadCharacteristicValueEvent* = object
     common*: GattEventCommon
     value*: seq[uint8]
-
   # 1.5.70 GATT Handle Value 通知
-  GattHandleValueEvent* = object
+  GattHandleValue* = object
     common*: GattEventCommon
     peer*: PeerAddr
     handle*: uint16

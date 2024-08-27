@@ -12,10 +12,13 @@ import ./basic/types
 import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
+import ./gatt/parsers
+import ./gatt/types
 import ./sm/types
 import ./util
 export opc
 export mailbox
+export GattEventCommon, GattHandleValue
 
 type
   #GattId = distinct uint16
@@ -39,7 +42,7 @@ type
     gattId*: uint16
     gattRespQueue: Mailbox[GattConfirm]
     gattEventQueue: Mailbox[GattEvent]
-    gattNotifyQueue: Mailbox[GattEvent]
+    gattNotifyQueue: Mailbox[GattHandleValue]
   GattQueues* = ref GattQueuesObj
   GattQueuesPtr* = ptr GattQueues
   BleClientObj = object
@@ -219,16 +222,16 @@ proc gattEventHandler(self: BleClient, opc: uint16, response: string) {.async.} 
 proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.} =
   if response.len < 4:
     return
-  let gattId = response.getLe16(4)
+  let event_opt = parseGattHandleValuesEvent(response)
+  if event_opt.isNone:
+    # parse error
+    return
+  let event = event_opt.get()
+  let gattId = event.common.gattId
   if self.tblGattQueues.hasKey(gattId):
     let queue = self.tblGattQueues[gattId]
     if queue.gattNotifyQueue.full:
       return
-    let event = new GattEvent
-    event.opc = response.getOpc()
-    event.gattId = gattId
-    event.gattResult = response.getLeInt16(2)
-    event.payload = response
     await queue.gattNotifyQueue.put(event)
 
 # ------------------------------------------------------------------------------
@@ -444,7 +447,7 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[GattEvent] {.async.} =
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitNotify*(self: GattClient, timeout = 0): Future[GattEvent] {.async.} =
+proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async.} =
   try:
     let queue = self.queues.gattNotifyQueue
     let res_opt = await queue.get(timeout)
@@ -509,7 +512,7 @@ proc newGattQueues(self: BleClient, gattId: uint16): GattQueues =
   result.gattId = gattID
   result.gattRespQueue = newMailbox[GattConfirm](4)
   result.gattEventQueue = newMailbox[GattEvent](16)
-  result.gattNotifyQueue = newMailbox[GattEvent](6)
+  result.gattNotifyQueue = newMailbox[GattHandleValue](6)
 
 # ------------------------------------------------------------------------------
 # Constructor:

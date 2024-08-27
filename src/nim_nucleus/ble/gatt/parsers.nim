@@ -15,7 +15,7 @@ type
 # ------------------------------------------------------------------------------
 # GATT Common Fields
 # ------------------------------------------------------------------------------
-proc parseGattEventCommon(payload: string): GattEventCommon {.inline.} =
+proc parseGattEventCommon*(payload: string): GattEventCommon {.inline.} =
   result.gattResult = payload.getLeInt16(2)
   result.gattId = payload.getLe16(4)
 
@@ -199,14 +199,14 @@ proc parseGattReadCharacteristicValue*(payload: string):
 # ------------------------------------------------------------------------------
 # 1.5.70: GATT Handle Values 通知
 # ------------------------------------------------------------------------------
-proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValueEvent] =
+proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValue] =
   const procName = "parseGattHandleValuesEvent"
   if payload.len < 18:
     let errmsg = &"! {procName}: payload length too short, {payload.len} [bytes]"
     syslog.error(errmsg)
     return
   try:
-    var res: GattHandleValueEvent
+    var res: GattHandleValue
     res.common = payload.parseGattEventCommon()
     res.peer.addrType = payload.getU8(6).AddrType
     res.peer.address = payload.getBdAddr(7)
