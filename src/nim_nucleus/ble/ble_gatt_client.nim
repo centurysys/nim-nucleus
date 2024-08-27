@@ -1,11 +1,12 @@
 import std/asyncdispatch
 import std/options
-import std/strformat
 import ./core/gatt_result
 import ./core/opc
 import ./gatt/parsers
+import ./gatt/types
 import ./ble_client
 import ./util
+export types, gatt_result
 
 # ------------------------------------------------------------------------------
 #
@@ -166,3 +167,24 @@ proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
     else:
       discard
   result = some(res)
+
+# ------------------------------------------------------------------------------
+# 1.5.28: GATT Read Characteristic Value 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattReadCharacteristicValue*(self: GattClient, handle: uint16):
+    Future[Option[seq[uint8]]] {.async.} =
+  const
+    insOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_VALUE_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_VALUE_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_VALUE_EVT
+  var buf: array[6, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, handle)
+  let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if resp_opt.isNone:
+    return
+  let response = resp_opt.get()
+  let res_opt = response.parseGattReadCharacteristicValue()
+  if res_opt.isNone:
+    return
+  result = some(res_opt.get.value)
