@@ -220,7 +220,9 @@ proc gattEventHandler(self: BleClient, opc: uint16, response: string) {.async.} 
 # Handle GATT Notify
 # ------------------------------------------------------------------------------
 proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.} =
+  const procName = "gattNotifyHandler"
   if response.len < 4:
+    echo &"! {procName}: response length error"
     return
   let event_opt = parseGattHandleValuesEvent(response)
   if event_opt.isNone:
@@ -231,6 +233,8 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
   if self.tblGattQueues.hasKey(gattId):
     let queue = self.tblGattQueues[gattId]
     if queue.gattNotifyQueue.full:
+      let errmsg = &"! {procName}: Notify Queue (gattID: {gattId}) is full!"
+      syslog.error(errmsg)
       return
     await queue.gattNotifyQueue.put(event)
 
@@ -287,7 +291,7 @@ proc taskSender(self: BleClient) {.async.} =
     let payload = payload_opt.get()
     if not self.bmtStarted:
       continue
-    self.debugEcho(&"* sender: payload: {hexDump(payload)}")
+    #self.debugEcho(&"* sender: payload: {hexDump(payload)}")
     await self.lck.acquire()
     let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
     if res != 0:
@@ -453,8 +457,11 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async
     let res_opt = await queue.get(timeout)
     if res_opt.isSome:
       result = res_opt.get()
+    else:
+      echo "?? NotifyQueue get failed."
   except:
-    discard
+    let err = getCurrentExceptionMsg()
+    echo err
 
 # ------------------------------------------------------------------------------
 # API: GATT Client: Send Instruction -> Wait Confirmwation
