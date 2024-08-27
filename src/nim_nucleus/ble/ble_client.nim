@@ -90,6 +90,7 @@ proc debugEcho*(self: BleClient, msg: string) =
 proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   var buf = newString(dl)
   copyMem(addr buf[0], df, dl)
+  zeroMem(df, dl)
   ev.deque.addLast(buf)
   ev.ev.fire()
 
@@ -476,7 +477,10 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
   if not await self.gattSend(payload, cfmOpc):
     return
   let response = await self.waitEvent()
-  if response.payload.getOpc() == evtOpc:
+  let resOpc = response.payload.getOpc()
+  if  resOpc != evtOpc:
+    syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
+  else:
     result = some(response.payload)
 
 # ------------------------------------------------------------------------------
