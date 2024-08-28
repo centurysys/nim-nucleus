@@ -1,4 +1,5 @@
 import std/options
+import std/streams
 import std/strformat
 import ../core/hci_status
 import ./types
@@ -9,6 +10,29 @@ export types
 # ==============================================================================
 # Event Parsers
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc parseAdvertisingData(self: var AdvertisingReport, payload: string) =
+  echo payload.hexDump()
+  let s = newStringStream(payload)
+  while true:
+    if s.atEnd:
+      break
+    let len = cast[uint8](s.readChar()).int
+    let kind = cast[uint8](s.readChar()).uint8
+    echo &"-- len: {len:2d}, kind: 0x{kind:02x}"
+    case kind
+    of AdType.Flags.uint8:
+      let flags = s.readUint8()
+      self.flags = some(flags)
+    of AdType.ShortName.uint8, AdType.CompleteName.uint8:
+      let name = s.readStr(len)
+      if name.len > 0:
+        self.name = some(name)
+    else:
+      discard s.readStr(len)
 
 # ------------------------------------------------------------------------------
 # 1.2.15 LE Advertising Report 通知
@@ -26,6 +50,7 @@ proc parseAdvertisingReport*(payload: string): Option[AdvertisingReport] =
     if dataLen > 0:
       res.data = newString(dataLen)
       copyMem(addr res.data[0], addr payload[11], dataLen)
+      res.parseAdvertisingData(res.data)
     res.rssi = payload.getS8(42)
     result = some(res)
   except:

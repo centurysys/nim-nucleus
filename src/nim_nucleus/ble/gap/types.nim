@@ -50,6 +50,10 @@ type
     Enable = 0x01'u8
 
 type
+  AdType* {.pure.} = enum
+    Flags = 0x01'u8
+    ShortName = 0x08'u8
+    CompleteName = 0x09'u8
   EventType* {.pure.} = enum
     IND = 0x00
     DIRECT_IND = 0x01
@@ -75,8 +79,9 @@ type
   AdvertisingReport* = object
     eventType*: EventType
     peer*: PeerAddr
-    name*: Option[string]
     data*: string
+    name*: Option[string]
+    flags*: Option[uint8]
     rssi*: int8
   # 1.2.16 LE Connection Complete 通知 (0x4019)
   ConnectionCompleteEvent* = object
