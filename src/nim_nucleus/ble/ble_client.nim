@@ -93,9 +93,9 @@ proc debugEcho*(self: BleClient, msg: string) =
 proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   var buf = newString(dl)
   copyMem(addr buf[0], df, dl)
-  zeroMem(df, dl)
   ev.deque.addLast(buf)
   ev.ev.fire()
+  poll(1)
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
