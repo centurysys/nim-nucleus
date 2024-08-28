@@ -52,7 +52,7 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
   while true:
     let response = await self.waitEvent(timeout = 1000)
     if response.isNil:
-      return
+      break
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -63,7 +63,8 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
       break
     else:
       discard
-  result = some(res)
+  if res.services.len > 0:
+    result = some(res)
 
 # ------------------------------------------------------------------------------
 # 1.5.16: GATT All Characteristics of a Service 指示->確認->通知
@@ -86,7 +87,7 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
   while true:
     let response = await self.waitEvent(timeout = 1000)
     if response.isNil:
-      return
+      break
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -97,7 +98,8 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
       break
     else:
       discard
-  result = some(res)
+  if res.characteristics.len > 0:
+    result = some(res)
 
 # ------------------------------------------------------------------------------
 # 1.5.20: GATT Discover Characteristics by UUID 指示->確認->通知
@@ -119,7 +121,7 @@ proc gattDiscoverCharacteristicsByUuid*(self: GattClient, startHandle: uint16,
     return
   var res: GattCharacteristicsOfService
   while true:
-    let response = await self.waitEvent(timeout = 1000)
+    let response = await self.waitEvent(timeout = 30 * 1000)
     if response.isNil:
       break
     let opc = response.payload.getOpc()
@@ -132,7 +134,8 @@ proc gattDiscoverCharacteristicsByUuid*(self: GattClient, startHandle: uint16,
       break
     else:
       discard
-  result = some(res)
+  if res.characteristics.len > 0:
+    result = some(res)
 
 # ------------------------------------------------------------------------------
 # 1.5.24: GATT All Characteristic Descriptors 指示->確認->通知
@@ -190,6 +193,27 @@ proc gattReadCharacteristicValue*(self: GattClient, handle: uint16):
   result = some(res_opt.get.value)
 
 # ------------------------------------------------------------------------------
+# 1.5.40: GATT Read Characteristic Descriptors 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattReadCharacteristicDescriptors*(self: GattClient, handle: uint16):
+    Future[Option[seq[uint8]]] {.async.} =
+  const
+    insOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_DESCRIPTORS_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_DESCRIPTORS_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_READ_CHARACTERISTIC_DESCRIPTORS_EVT
+  var buf: array[6, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, handle)
+  let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if resp_opt.isNone:
+    return
+  let response = resp_opt.get()
+  let res_opt = response.parseGattReadCharacteristicDescriptors()
+  if res_opt.isNone:
+    return
+  result = some(res_opt.get.descs)
+
+# ------------------------------------------------------------------------------
 # 1.5.52: GATT Write Characteristic Value 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
@@ -204,6 +228,31 @@ proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
   buf.setLe16(4, handle)
   buf.setLe16(6, value.len.uint16)
   copyMem(addr buf[8], addr value[0], value.len)
+  let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if resp_opt.isNone:
+    return
+  let response = resp_opt.get()
+  let res = response.parseGattEventCommon()
+  if res.gattResult != 0:
+    logGattResult(procName, res.gattResult, detail = true)
+  else:
+    result = true
+
+# ------------------------------------------------------------------------------
+# 1.5.64: GATT Write Characteristic Descriptors 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicDescriptors*(self: GattClient, handle: uint16,
+    descs: seq[uint8|char]|string): Future[bool] {.async.} =
+  const
+    procName = "gattWriteCharacteristicDescriptors"
+    insOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_DESCRIPTORS_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_DESCRIPTORS_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_WRITE_CHARACTERISTIC_DESCRIPTORS_EVT
+  var buf: array[520, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, handle)
+  buf.setLe16(6, descs.len.uint16)
+  copyMem(addr buf[8], addr descs[0], descs.len)
   let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
   if resp_opt.isNone:
     return
@@ -235,3 +284,21 @@ proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
   var buf = newSeq[uint8](1)
   buf[0] = value
   result = await self.gattWriteCharacteristicValue(handle, buf)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicDescriptors*(self: GattClient, handle: uint16,
+    descs: uint16): Future[bool] {.async.} =
+  var buf = newSeq[uint8](2)
+  buf.setLe16(0, descs)
+  result = await self.gattWriteCharacteristicDescriptors(handle, buf)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattWriteCharacteristicDescriptors*(self: GattClient, handle: uint16,
+    descs: uint8): Future[bool] {.async.} =
+  var buf = newSeq[uint8](1)
+  buf[0] = descs
+  result = await self.gattWriteCharacteristicDescriptors(handle, buf)

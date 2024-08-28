@@ -74,6 +74,10 @@ type
   GattReadCharacteristicValueEvent* = object
     common*: GattEventCommon
     value*: seq[uint8]
+  # 1.5.42 GATT Read Characteristic Descriptors 通知
+  GattReadCharacteristicDescriptorsEvent* = object
+    common*: GattEventCommon
+    descs*: seq[uint8]
   # 1.5.70 GATT Handle Value 通知
   GattHandleValue* = object
     common*: GattEventCommon

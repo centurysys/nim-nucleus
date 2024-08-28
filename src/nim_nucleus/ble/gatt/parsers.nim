@@ -197,6 +197,26 @@ proc parseGattReadCharacteristicValue*(payload: string):
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.5.42: GATT Read Characteristic Descriptors 通知
+# ------------------------------------------------------------------------------
+proc parseGattReadCharacteristicDescriptors*(payload: string):
+    Option[GattReadCharacteristicDescriptorsEvent] =
+  const procName = "parseGattReadCharacteristicDescriptors"
+  if not checkPayloadLen(procName, payload, 520):
+    return
+  var res: GattReadCharacteristicDescriptorsEvent
+  try:
+    res.common = payload.parseGattEventCommon()
+    let descLen = payload.getLe16(6).int
+    res.descs = newSeq[uint8](descLen)
+    copyMem(addr res.descs[0], addr payload[8], descLen)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.5.70: GATT Handle Values 通知
 # ------------------------------------------------------------------------------
 proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValue] =
