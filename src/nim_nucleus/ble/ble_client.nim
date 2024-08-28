@@ -4,6 +4,7 @@ import std/options
 import std/strformat
 import std/strutils
 import std/tables
+import std/times
 import ../lib/asyncsync
 import ../lib/mailbox
 import ../lib/syslog
@@ -83,9 +84,15 @@ var ev: EventObj
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc debugEcho*(self: BleClient, msg: string) =
+proc debugEcho*(self: BleClient, msg: string, header = true) =
   if self.debug:
-    echo msg
+    var hdr: string
+    if header:
+      let now = now()
+      let millisec = int(now.toTime.toUnixFloat * 1000.0) mod 1000
+      let nowTime = now().format("yyyy/MM/dd HH:mm:ss")
+      hdr = &"{nowTime}.{millisec:03d}: "
+    echo &"{hdr}{msg}"
 
 # ------------------------------------------------------------------------------
 # BTM Callback
