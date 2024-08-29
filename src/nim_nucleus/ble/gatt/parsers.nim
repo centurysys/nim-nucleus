@@ -197,6 +197,32 @@ proc parseGattReadCharacteristicValue*(payload: string):
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
+# 1.5.33: GATT Read Using Characteristic UUID 通知
+# ------------------------------------------------------------------------------
+proc parseGattReadUsingCharacteristicUuid*(payload: string):
+    Option[GattReadUsingCharacteristicUuidEvent] =
+  const procName = "parseGattReadUsingCharacteristicUuid"
+  if not checkPayloadLen(procName, payload, 1030):
+    return
+  var res: GattReadUsingCharacteristicUuidEvent
+  try:
+    res.common = payload.parseGattEventCommon()
+    let nums = payload.getU8(6).int
+    let eachLen = payload.getU8(7).int
+    res.values = newSeq[HandleValue](nums)
+    var pos = 8
+    for i in 0 ..< nums:
+      res.values[i].handle = payload.getLe16(pos)
+      res.values[i].value = newSeq[uint8](eachLen - 2)
+      copyMem(addr res.values[i].value[0], addr payload[pos + 2], eachLen - 2)
+      pos.inc(eachLen)
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
 # 1.5.42: GATT Read Characteristic Descriptors 通知
 # ------------------------------------------------------------------------------
 proc parseGattReadCharacteristicDescriptors*(payload: string):

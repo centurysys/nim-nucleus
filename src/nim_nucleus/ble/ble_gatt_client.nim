@@ -1,11 +1,13 @@
 import std/asyncdispatch
 import std/options
+import std/strformat
 import ./core/gatt_result
 import ./core/opc
 import ./gatt/parsers
 import ./gatt/types
 import ./ble_client
 import ./util
+import ../lib/syslog
 export types, gatt_result
 
 # ------------------------------------------------------------------------------
@@ -193,6 +195,31 @@ proc gattReadCharacteristicValue*(self: GattClient, handle: uint16):
   result = some(res_opt.get.value)
 
 # ------------------------------------------------------------------------------
+# 1.5.31: GATT Read Using Characteristic UUID 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattReadUsingCharacteristicUuid*(self: GattClient, startHandle: uint16,
+    endHandle: uint16, uuid: Uuid): Future[Option[seq[HandleValue]]] {.async.} =
+  const
+    insOpc = BTM_D_OPC_BLE_GATT_C_READ_USING_CHARACTERISTIC_UUID_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_READ_USING_CHARACTERISTIC_UUID_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_READ_USING_CHARACTERISTIC_UUID_EVT
+  var buf: array[25, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, startHandle)
+  buf.setLe16(6, endHandle)
+  buf.setUuid(8, uuid)
+  let payload = buf.toString()
+  self.bleClient.debugEcho(&"*** ReadUsingCharacteristicUuid: payload: {payload.hexDump}")
+  let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if resp_opt.isNone:
+    return
+  let response = resp_opt.get()
+  let res_opt = response.parseGattReadUsingCharacteristicUuid()
+  if res_opt.isNone:
+    return
+  result = some(res_opt.get.values)
+
+# ------------------------------------------------------------------------------
 # 1.5.40: GATT Read Characteristic Descriptors 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattReadCharacteristicDescriptors*(self: GattClient, handle: uint16):
@@ -266,6 +293,19 @@ proc gattWriteCharacteristicDescriptors*(self: GattClient, handle: uint16,
 # ==============================================================================
 # Helper functions
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattReadUsingCharacteristicUuid*(self: GattClient, startHandle: uint16,
+    endHandle: uint16, uuidStr: string): Future[Option[seq[HandleValue]]] {.async.} =
+  let uuid_opt = uuidStr.str2uuid()
+  if uuid_opt.isNone:
+    let errmsg = &"! gattReadUsingCharacteristicUuid: invalid UUID: {uuidStr}"
+    syslog.error(errmsg)
+    return
+  let uuid = uuid_opt.get()
+  result = await self.gattReadUsingCharacteristicUuid(startHandle, endHandle, uuid)
 
 # ------------------------------------------------------------------------------
 #

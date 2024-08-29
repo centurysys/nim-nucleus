@@ -36,6 +36,9 @@ type
   CharacteristicDescriptor* = object
     handle*: uint16
     uuid*: Uuid
+  HandleValue* = object
+    handle*: uint16
+    value*: seq[uint8]
 
 # Event (Common)
 type
@@ -74,6 +77,10 @@ type
   GattReadCharacteristicValueEvent* = object
     common*: GattEventCommon
     value*: seq[uint8]
+  # 1.5.33 GATT Read Using Characteristic UUID 通知
+  GattReadUsingCharacteristicUuidEvent* = object
+    common*: GattEventCommon
+    values*: seq[HandleValue]
   # 1.5.42 GATT Read Characteristic Descriptors 通知
   GattReadCharacteristicDescriptorsEvent* = object
     common*: GattEventCommon
