@@ -14,8 +14,8 @@ export types
 # ------------------------------------------------------------------------------
 # 1.2.11 LE Set Scan Parameters 要求
 # ------------------------------------------------------------------------------
-proc setScanParametersReq*(self: BleClient, scanType: ScanType, scanInterval: uint16 = 0x0010,
-    scanWindow: uint16 = 0x0010, ownAddrType: AddrType, ownRandomAddrType: RandomAddrType,
+proc setScanParametersReq*(self: BleClient, scanType: ScanType, scanInterval: uint16 = 0x0060,
+    scanWindow: uint16 = 0x0030, ownAddrType: AddrType, ownRandomAddrType: RandomAddrType,
     filterPolicy: ScanFilterPolicy = ScanFilterPolicy.AcceptAllExceptDirected):
     Future[bool] {.async.} =
   const
