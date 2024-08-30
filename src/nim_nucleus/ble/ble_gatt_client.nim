@@ -52,7 +52,7 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
     return
   var res: GattAllPrimaryServices
   while true:
-    let response = await self.waitEvent(timeout = 1000)
+    let response = await self.waitEvent(timeout = 30 * 1000)
     if response.isNil:
       break
     let opc = response.payload.getOpc()
@@ -87,7 +87,7 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
     return
   var res: GattCharacteristicsOfService
   while true:
-    let response = await self.waitEvent(timeout = 1000)
+    let response = await self.waitEvent(timeout = 30 * 1000)
     if response.isNil:
       break
     let opc = response.payload.getOpc()
@@ -158,7 +158,7 @@ proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
     return
   var res: GattAllCharacteristicDescriptors
   while true:
-    let response = await self.waitEvent(timeout = 1000)
+    let response = await self.waitEvent(timeout = 30 * 1000)
     if response.isNil:
       return
     let opc = response.payload.getOpc()
