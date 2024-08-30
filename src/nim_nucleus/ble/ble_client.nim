@@ -101,7 +101,8 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
   var buf = newString(dl)
   copyMem(addr buf[0], df, dl)
   ev.deque.addLast(buf)
-  ev.ev.fire()
+  if not ev.ev.isSet:
+    ev.ev.fire()
   poll(1)
 
 # ------------------------------------------------------------------------------
