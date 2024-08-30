@@ -165,6 +165,8 @@ proc waitResponse*(self: BleClient, timeout: int = 0): Future[string] {.async.} 
   let res_opt = await self.mainRespQueue.get(timeout)
   if res_opt.isSome:
     result = res_opt.get()
+  else:
+    syslog.error("! waitResponse: timeouted")
 
 # ------------------------------------------------------------------------------
 # Wait Event Queue
@@ -173,6 +175,8 @@ proc waitEvent*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
   let res_opt = await self.mainEventQueue.get(timeout)
   if res_opt.isSome:
     result = res_opt.get()
+  else:
+    syslog.error("! waitEvent: timeouted")
 
 # ------------------------------------------------------------------------------
 # Wait Event Queue (for Applications)
@@ -250,7 +254,7 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
 # BTM Task: Response Handler
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
-  proc releaseLock(self: BleClient) =
+  proc releaseLock() =
     if self.lck.locked:
       self.lck.release()
 
@@ -267,14 +271,14 @@ proc responseHandler(self: BleClient) {.async.} =
         discard await self.putAdvertising(opc, response)
       elif opc in OPC_MAIN_RESPONSES:
         self.debugEcho(" -> OPC_MAIN_RESPONSES")
-        self.releaseLock()
+        releaseLock()
         discard await self.putResponse(opc, response)
       elif opc in OPC_MAIN_EVENTS:
         self.debugEcho(" -> OPC_MAIN_EVENTS")
         discard await self.putEvent(opc, response)
       elif opc in OPC_GATT_CLIENT_CONFIRMATIONS:
         self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
-        self.releaseLock()
+        releaseLock()
         await self.gattResponseHandler(opc, response)
       elif opc in OPC_GATT_CLIENT_EVENTS:
         self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
@@ -284,8 +288,10 @@ proc responseHandler(self: BleClient) {.async.} =
         await self.gattNotifyHandler(opc, response)
       else:
         self.debugEcho("OPC not found")
+        continue
       # 他のtaskにまわす
-      await sleepAsync(1)
+      if hasPendingOperations():
+        poll(1)
     self.event.ev.clear()
 
 # ==============================================================================
@@ -317,7 +323,7 @@ proc taskDummy(self: BleClient) {.async.} =
 proc newEvent(dequeSize: int = DEQUE_SIZE): Event =
   if not ev.initialized:
     ev.ev = newAsyncEv()
-    ev.deque = initDeque[string](DEQUE_SIZE)
+    ev.deque = initDeque[string](dequeSize)
     ev.initialized = true
   result = addr ev
 
@@ -386,27 +392,29 @@ proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # API: Send Command
 # ------------------------------------------------------------------------------
-proc btmSendRecv*(self: BleClient, payload: string): Future[Option[string]] {.async.} =
+proc btmSendRecv*(self: BleClient, payload: string, timeout = 0):
+    Future[Option[string]] {.async.} =
   if not await self.btmSend(payload):
     return
-  let res = await self.waitResponse()
+  let res = await self.waitResponse(timeout)
   if res.len > 0:
-    debugEcho(&"--> received: {res.hexDump()}")
     result = some(res)
 
 # ------------------------------------------------------------------------------
 # API: Send Command
 # ------------------------------------------------------------------------------
-proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char]): Future[Option[string]] {.async.} =
+proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char], timeout = 0):
+    Future[Option[string]] {.async.} =
   let payload = buf.toString(buf.len)
-  result = await self.btmSendRecv(payload)
+  result = await self.btmSendRecv(payload, timeout)
 
 # ------------------------------------------------------------------------------
 # API: Send Request/Receive, Check Response
 # ------------------------------------------------------------------------------
-proc btmRequest*(self: BleClient, procName: string, payload: string, expectedOpc: uint16):
+proc btmRequest*(self: BleClient, procName: string, payload: string,
+    expectedOpc: uint16, timeout = 0):
     Future[bool] {.async.} =
-  let res_opt = await self.btmSendRecv(payload)
+  let res_opt = await self.btmSendRecv(payload, timeout)
   if res_opt.isNone:
     let errmsg = &"! {procName}: failed"
     syslog.error(errmsg)
@@ -483,7 +491,8 @@ proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
     return
   if res.gattResult != 0:
     let gattError = res.gattResult.gattResultToString()
-    syslog.error(&"! gattSend: failed, {gattError}")
+    let errmsg = &"! gattSend: failed, {gattError}"
+    syslog.error(errmsg)
     return
   result = true
 
