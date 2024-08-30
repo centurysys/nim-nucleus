@@ -1,4 +1,5 @@
 import std/options
+import std/tables
 import ../core/hci_status
 import ../common/common_types
 export common_types
@@ -54,6 +55,7 @@ type
     Flags = 0x01'u8
     ShortName = 0x08'u8
     CompleteName = 0x09'u8
+    ManufacturerSpecific = 0xff'u8
   EventType* {.pure.} = enum
     IND = 0x00
     DIRECT_IND = 0x01
@@ -79,9 +81,10 @@ type
   AdvertisingReport* = object
     eventType*: EventType
     peer*: PeerAddr
-    data*: string
+    rawdata*: string
     name*: Option[string]
     flags*: Option[uint8]
+    data*: Table[uint8, string]
     rssi*: int8
   # 1.2.16 LE Connection Complete 通知 (0x4019)
   ConnectionCompleteEvent* = object
