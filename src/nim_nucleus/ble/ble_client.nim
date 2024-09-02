@@ -260,30 +260,37 @@ proc responseHandler(self: BleClient) {.async.} =
 
   while true:
     await self.event.ev.wait()
+    self.event.ev.clear()
     while self.event.deque.len > 0:
-      let response = self.event.deque.popFirst()
+      let msg = self.event.deque.popFirst()
+      let response = msg.msg
       if response.len < 3:
+        debugEcho("! responseHandler: ?????")
         continue
       let opc = response.getOpc()
-      self.debugEcho(&"### Response from BTM: OPC: [{opc:04X}]")
-      if opc in OPC_GAP_ADVERTISING:
+      let opcKind = opc.opc2kind()
+      if self.debug:
+        let callbackTime = msg.timestamp.formatTime
+        self.debugEcho(&"### Response from BTM: OPC: [{opc:04X}] -> {opcKind} ({callbackTime})")
+      case opcKind
+      of OpcKind.GapAdvertise:
         self.debugEcho(" -> OPC_GAP_ADVERTISING")
         discard await self.putAdvertising(opc, response)
-      elif opc in OPC_MAIN_RESPONSES:
+      of OpcKind.MainResponses:
         self.debugEcho(" -> OPC_MAIN_RESPONSES")
         releaseLock()
         discard await self.putResponse(opc, response)
-      elif opc in OPC_MAIN_EVENTS:
+      of OpcKind.MainEvents:
         self.debugEcho(" -> OPC_MAIN_EVENTS")
         discard await self.putEvent(opc, response)
-      elif opc in OPC_GATT_CLIENT_CONFIRMATIONS:
+      of OpcKind.GattClientConfirmations:
         self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
         releaseLock()
         await self.gattResponseHandler(opc, response)
-      elif opc in OPC_GATT_CLIENT_EVENTS:
+      of OpcKind.GattClientEvents:
         self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
         await self.gattEventHandler(opc, response)
-      elif opc in OPC_GATT_CLIENT_NOTIFY:
+      of OpcKind.GattClientNotifications:
         self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
         await self.gattNotifyHandler(opc, response)
       else:
@@ -292,7 +299,6 @@ proc responseHandler(self: BleClient) {.async.} =
       # 他のtaskにまわす
       if hasPendingOperations():
         poll(1)
-    self.event.ev.clear()
 
 # ==============================================================================
 # BTM Task: Sender
