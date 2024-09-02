@@ -23,8 +23,11 @@ export GattEventCommon, GattHandleValue
 
 type
   #GattId = distinct uint16
+  CallbackMsg = ref object
+    msg: string
+    timestamp: DateTime
   EventObj = object
-    deque: Deque[string]
+    deque: Deque[CallbackMsg]
     ev: AsyncEv
     initialized: bool
   Event = ptr EventObj
@@ -77,32 +80,50 @@ type
   GattClient* = ref GattClientObj
 
 const
-  DEQUE_SIZE = 16
+  DEQUE_SIZE = 128
 
-var ev: EventObj
+var
+  ev: EventObj
+  logEv: EventObj
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `=destroy`(x: BleClientObj) =
+  try:
+    if x.bmtStarted:
+      discard BTM_Start(BTM_MODE_SHUTDOWN)
+  except:
+    discard
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc formatTime(dt: DateTime): string {.inline.} =
+  let t = now().toTime
+  let microsec = int(t.toUnixFloat * 1000000.0) mod 1000000
+  let nowTime = t.format("yyyy/MM/dd HH:mm:ss")
+  result = &"{nowTime}.{microsec:06d}"
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
 proc debugEcho*(self: BleClient, msg: string, header = true) =
   if self.debug:
-    var hdr: string
-    if header:
-      let now = now()
-      let millisec = int(now.toTime.toUnixFloat * 1000.0) mod 1000
-      let nowTime = now().format("yyyy/MM/dd HH:mm:ss")
-      hdr = &"{nowTime}.{millisec:03d}: "
-    echo &"{hdr}{msg}"
+    debugEcho(msg, header)
 
 # ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
 proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
+  let callbackTime = now()
   var buf = newString(dl)
   copyMem(addr buf[0], df, dl)
-  ev.deque.addLast(buf)
-  if not ev.ev.isSet:
-    ev.ev.fire()
+  let msg = new CallbackMsg
+  msg.msg = buf
+  msg.timestamp = callbackTime
+  ev.deque.addLast(msg)
+  ev.ev.fire()
   poll(1)
 
 # ------------------------------------------------------------------------------
@@ -111,8 +132,26 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
 proc debugLogCallback(ctx: pointer, text: cstring) {.cdecl.} =
   let logtext = ($text).strip()
   if logtext.len > 0:
-    let buf = &"[BTM Log]: {logtext}"
-    echo buf
+    let msg = new CallbackMsg
+    msg.msg = logtext
+    msg.timestamp = now()
+    logEv.deque.addLast(msg)
+    if not logEv.ev.isSet:
+      logev.ev.fire()
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc logHandler() {.async.} =
+  while true:
+    await logEv.ev.wait()
+    logEv.ev.clear()
+    while logEv.deque.len > 0:
+      let msg = logEv.deque.popFirst()
+      let microSec = int(msg.timestamp.toTime.toUnixFloat * 1000000.0) mod 1000000
+      let dateTime = msg.timestamp.format("yyyy/MM/dd HH:mm:ss")
+      let logmsg = &"[BTM {dateTime}.{microSec:06d}] {msg.msg}"
+      echo logmsg
 
 # ------------------------------------------------------------------------------
 # BTM Callback (error log)
@@ -136,11 +175,12 @@ proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.as
 # ------------------------------------------------------------------------------
 proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
   if opc in self.waitingEvents:
-    debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Queue.")
+    self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Queue.")
     await self.appEventQueue.put(data)
     result = true
   else:
     if not self.mainEventQueue.full:
+      self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Main Event Queue.")
       await self.mainEventQueue.put(data)
       result = true
     else:
@@ -265,7 +305,7 @@ proc responseHandler(self: BleClient) {.async.} =
       let msg = self.event.deque.popFirst()
       let response = msg.msg
       if response.len < 3:
-        debugEcho("! responseHandler: ?????")
+        self.debugEcho("! responseHandler: ?????")
         continue
       let opc = response.getOpc()
       let opcKind = opc.opc2kind()
@@ -326,19 +366,21 @@ proc taskDummy(self: BleClient) {.async.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc newEvent(dequeSize: int = DEQUE_SIZE): Event =
+proc initEvent(ev: ptr EventObj, dequeSize: int = DEQUE_SIZE): bool =
   if not ev.initialized:
     ev.ev = newAsyncEv()
-    ev.deque = initDeque[string](dequeSize)
+    ev.deque = initDeque[CallbackMsg](dequeSize)
     ev.initialized = true
-  result = addr ev
+    result = true
 
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
 proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   new result
-  result.event = newEvent()
+  discard initEvent(addr ev)
+  discard initEvent(addr logEv)
+  result.event = addr ev
   result.mainAdvQueue = newMailbox[string](10)
   result.mainRespQueue = newMailbox[string](5)
   result.mainEventQueue = newMailbox[string](5)
@@ -363,6 +405,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
       let nullp = cast[pointer](0)
       discard BTM_SetLogOutputCallback(debugLogCallback.BTM_CB_DEBUG_LOG_OUTPUT_FP,
           nullp, errorLogCallback.BTM_CB_ERROR_LOG_OUTPUT_FP, nullp)
+      asyncCheck logHandler()
     self.lck = newAsyncLock()
     self.callbackInitialized = true
     asyncCheck self.taskDummy()
