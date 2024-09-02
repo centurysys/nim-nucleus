@@ -2,6 +2,7 @@ import std/options
 import std/sequtils
 import std/strformat
 import std/strutils
+import std/times
 import ./common/common_types
 import ../lib/syslog
 
@@ -33,6 +34,18 @@ proc hexDump*(x: string, hexAddr = false): string =
       let line = &"{baseAddr} | {content}"
       lines.add(line)
   result = lines.join("\n")
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc debugEcho*(msg: string, header = true) =
+  var hdr: string
+  if header:
+    let ts = now().toTime
+    let microsec = int(ts.toUnixFloat * 1000000.0) mod 1000000
+    let nowTime = ts.format("yyyy/MM/dd HH:mm:ss")
+    hdr = &"{nowTime}.{microsec:06d}: "
+  echo &"{hdr}{msg}"
 
 # ------------------------------------------------------------------------------
 #
