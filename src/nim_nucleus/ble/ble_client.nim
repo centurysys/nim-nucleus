@@ -339,6 +339,7 @@ proc responseHandler(self: BleClient) {.async.} =
       # 他のtaskにまわす
       if hasPendingOperations():
         poll(1)
+      GC_fullCollect()
 
 # ==============================================================================
 # BTM Task: Sender
