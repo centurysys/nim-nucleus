@@ -101,7 +101,7 @@ proc `=destroy`(x: BleClientObj) =
 # ------------------------------------------------------------------------------
 proc formatTime(dt: DateTime): string {.inline.} =
   let t = now().toTime
-  let microsec = int(t.toUnixFloat * 1000000.0) mod 1000000
+  let microsec = int64(t.toUnixFloat * 1000000.0) mod 1000000
   let nowTime = t.format("yyyy/MM/dd HH:mm:ss")
   result = &"{nowTime}.{microsec:06d}"
 
@@ -148,7 +148,7 @@ proc logHandler() {.async.} =
     logEv.ev.clear()
     while logEv.deque.len > 0:
       let msg = logEv.deque.popFirst()
-      let microSec = int(msg.timestamp.toTime.toUnixFloat * 1000000.0) mod 1000000
+      let microSec = int64(msg.timestamp.toTime.toUnixFloat * 1000000.0) mod 1000000
       let dateTime = msg.timestamp.format("yyyy/MM/dd HH:mm:ss")
       let logmsg = &"[BTM {dateTime}.{microSec:06d}] {msg.msg}"
       echo logmsg

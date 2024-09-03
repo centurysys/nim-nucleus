@@ -42,7 +42,7 @@ proc debugEcho*(msg: string, header = true) =
   var hdr: string
   if header:
     let ts = now().toTime
-    let microsec = int(ts.toUnixFloat * 1000000.0) mod 1000000
+    let microsec = int64(ts.toUnixFloat * 1000000.0) mod 1000000.int64
     let nowTime = ts.format("yyyy/MM/dd HH:mm:ss")
     hdr = &"{nowTime}.{microsec:06d}: "
   echo &"{hdr}{msg}"
