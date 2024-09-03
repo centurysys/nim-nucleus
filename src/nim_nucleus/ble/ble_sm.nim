@@ -9,7 +9,7 @@ import ./sm/requests
 import ./sm/parsers
 import ./util
 import ../lib/syslog
-export types
+export types, parsers
 
 # ------------------------------------------------------------------------------
 # 1.3.1 LE ローカル IO Capabilities 設定要求

@@ -8,7 +8,7 @@ import ./gatt/types
 import ./ble_client
 import ./util
 import ../lib/syslog
-export types, gatt_result
+export types, gatt_result, parsers
 
 # ------------------------------------------------------------------------------
 #

@@ -5,7 +5,7 @@ import ./core/opc
 import ./gap/types
 import ./gap/parsers
 import ./util
-export types
+export types, parsers
 
 # ==============================================================================
 # Requests
