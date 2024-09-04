@@ -23,7 +23,8 @@ proc eventHandler(self: BleClient) {.async.} =
 proc advertisingHandler(self: BleClient) {.async.} =
   while true:
     let msg = await self.waitAdvertising()
-    echo &"* Advertising: {msg.hexDump}"
+    #debugEcho &"* Advertising: {msg.hexDump}"
+    debugEcho "* Advertising"
     let event_opt = msg.parseEvent()
     if event_opt.isSome:
       let event = event_opt.get()
@@ -35,7 +36,7 @@ proc advertisingHandler(self: BleClient) {.async.} =
         echo &"* flags: 0x{report.flags.get:02x}"
       if report.name.isSome:
         echo &"* name: {report.name.get}"
-      echo &"* RSSI: {report.rssi} [dBm]"
+      debugEcho &"* RSSI: {report.rssi} [dBm]"
 
 # ------------------------------------------------------------------------------
 #
@@ -68,8 +69,9 @@ proc notificationHandler(self: GattClient) {.async.} =
 # ------------------------------------------------------------------------------
 # TI SensorTag
 # ------------------------------------------------------------------------------
-proc sensorTag(self: GattClient) {.async.} =
+proc sensorTag(self: GattClient, lock: AsyncLock) {.async.} =
   asyncCheck self.notificationHandler()
+  await lock.acquire()
   let mtu_opt = await self.gattExchangeMtu()
   if mtu_opt.isSome:
     echo &"*** MTU: {mtu_opt.get()}"
@@ -80,7 +82,7 @@ proc sensorTag(self: GattClient) {.async.} =
       echo &"*** Primary Services: {services.len}"
       for service in services:
         echo service
-  when true:
+  when false:
     let allCharacteristics = await self.gattAllCharacteristicsOfService(
       0x0001'u16, 0x00ff'u16)
     if allCharacteristics.isSome:
@@ -106,7 +108,7 @@ proc sensorTag(self: GattClient) {.async.} =
       echo "*** Characteristics By UUID"
       for characteristic in characteristics:
         echo characteristic
-  block:
+  when false:
     let descs = await self.gattAllCharacteristicDescriptors(0x0020'u16, 0x0027'u16)
     if descs.isSome:
       for characteristic in descs.get.characteristics:
@@ -129,12 +131,14 @@ proc sensorTag(self: GattClient) {.async.} =
     discard await self.gattWriteCharacteristicValue(0x0024'u16, 0'u8)
   let res = await self.disconnect()
   echo &" disconnect/deregister -> result: {res}"
+  lock.release()
 
 # ------------------------------------------------------------------------------
 # WitMotion WT901BLE
 # ------------------------------------------------------------------------------
-proc wt901ble(self: GattClient) {.async.} =
+proc wt901ble(self: GattClient, lock: AsyncLock) {.async.} =
   asyncCheck self.notificationHandler()
+  await lock.acquire()
   when true:
     let primaryServices = await self.gattAllPrimaryServices()
     if primaryServices.isSome:
@@ -169,12 +173,15 @@ proc wt901ble(self: GattClient) {.async.} =
       discard await self.gattWriteCharacteristicDescriptors(0x000c'u16, 0x0000'u16)
   let res = await self.disconnect()
   echo &" disconnect/deregister -> result: {res}"
+  lock.release()
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
 proc asyncMain*() {.async.} =
-  let ble = newBleClient(true)
+  let ble = newBleClient(true, false)
+  let locks = [newAsyncLock(), newAsyncLock()]
+  var fut_locks: array[2, Future[void]]
   asyncCheck ble.eventHandler()
   asyncCheck ble.advertisingHandler()
   block:
@@ -183,48 +190,62 @@ proc asyncMain*() {.async.} =
       return
   block:
     let res = await ble.setSecurityModeReq(SecurityMode.Level2)
-    echo &"setSecurityModeReq -> {res}"
+    debugEcho &"setSecurityModeReq -> {res}"
   block:
     let res = await ble.setLocalIoCapabilitiesReq(IoCap.NoInputNoOutput)
-    echo &"setLocalIoCapabilitiesReq -> {res}"
-  block:
-    let res = await ble.setScanParametersReq(ScanType.Active,
-        ownAddrType = AddrType.Public, ownRandomAddrType = RandomAddrType.Static)
-    echo &"setScanParametersReq -> {res}"
-  block:
-    let res = await ble.setScanEnableReq(scanEnable = true, filterDuplicates = true)
-    echo &"setScanEnableReq(Enable) -> {res}"
-  # 10sec scan
-  await sleepAsync(10 * 1000)
-  block:
-    let res = await ble.setScanEnableReq(scanEnable = false)
-    echo &"setScanEnableReq(Disable) -> {res}"
+    debugEcho &"setLocalIoCapabilitiesReq -> {res}"
   block:
     let res = await ble.setScanParametersReq(ScanType.Passive,
         ownAddrType = AddrType.Public, ownRandomAddrType = RandomAddrType.Static)
-    echo &"setScanParametersReq -> {res}"
+    debugEcho &"setScanParametersReq -> {res}"
   block:
+    debugEcho &"* setScanEnableReq(Enable)..."
     let res = await ble.setScanEnableReq(scanEnable = true, filterDuplicates = true)
-    echo &"setScanEnableReq(Enable) -> {res}"
-  await sleepAsync(2 * 1000)
-
+    debugEcho &"setScanEnableReq(Enable) -> {res}"
+  # 10sec scan
+  for cnt in countdown(9, 1):
+    debugEcho &"=== [{cnt}] wait..."
+    await sleepAsync(1 * 1000)
+  debugEcho("----- 10sec wait finished.")
   when true:
-    echo "------ start connecting to SensorTag..."
+    debugEcho &"* setScanEnableReq(Disable)..."
+    let res = await ble.setScanEnableReq(scanEnable = false, filterDuplicates = false)
+    debugEcho &"setScanEnableReq(Disable) -> {res}"
+  when false:
+    let res = await ble.setScanParametersReq(ScanType.Passive,
+        ownAddrType = AddrType.Public, ownRandomAddrType = RandomAddrType.Static)
+    debugEcho &"setScanParametersReq -> {res}"
+  when false:
+    let res = await ble.setScanEnableReq(scanEnable = false, filterDuplicates = true)
+    debugEcho &"setScanEnableReq(Enable) -> {res}"
+
+  debugEcho "===== Wait ====="
+  await sleepAsync(1 * 1000)
+
+  when false:
+    debugEcho "------ start connecting to SensorTag..."
     let client_opt = await ble.connection("C4:BE:84:70:09:00")
     if client_opt.isSome:
       let client = client_opt.get()
-      asyncCheck client.sensorTag()
-  when false:
+      asyncCheck client.sensorTag(locks[0])
+  when true:
     for retry in 0 ..< 3:
       echo &"------ start connecting to WT901BLE58 [{retry}]..."
       let client_opt = await ble.connection("CC:C1:AA:20:0D:61", random = true)
       if client_opt.isSome:
         echo " ==> connected"
         let client = client_opt.get()
-        asyncCheck client.wt901ble()
+        asyncCheck client.wt901ble(locks[1])
         break
 
-  for wait in 0 ..< 30:
-    await sleepAsync(1000)
+  for i in 0..1:
+    fut_locks[i] = locks[i].acquire()
+  await (fut_locks[0] and fut_locks[1])
+
+  block:
+    let res = await ble.setScanEnableReq(scanEnable = false, filterDuplicates = true)
+    debugEcho &"setScanEnableReq(Enable) -> {res}"
+  await sleepAsync(2 * 1000)
+  debugEcho "quit"
 
   quit(0)
