@@ -33,6 +33,7 @@ type
 type
   RemoteCollectionKeys* = object
     peer*: PeerAddr
+    bdAddrStr*: string
     auth*: Authentication
     encKeySize*: uint8
     irk*: array[16, uint8]
@@ -81,6 +82,9 @@ type
     peer*: PeerAddr
     smReason*: SmReason
 
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc toString(x: openArray[uint8]): string =
   let size = x.len
   var buf = newSeqOfCap[string](size)
@@ -89,9 +93,13 @@ proc toString(x: openArray[uint8]): string =
     buf.add(&"{val:02x}")
   result = buf.join(":")
 
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc `$`*(key: RemoteCollectionKeys): string =
   var buf = newSeqOfCap[string](10)
   buf.add("--- RemoteCollectionKeys ---")
+  buf.add(&"* Address: {key.peer.address.bdAddr2string} ({key.peer.addrType})")
   buf.add(&"* Authentication: {key.auth}")
   buf.add(&"* EncKeySize: {key.encKeysize}")
   buf.add(&"* IRK:  {key.irk.toString}")
