@@ -1,3 +1,5 @@
+import std/strformat
+import std/strutils
 import ../common/common_types
 import ../core/sm_reason
 import ../gap/types
@@ -39,6 +41,7 @@ type
     rand*: array[8, uint8]
     ediv*: uint16
     authorized*: bool
+    valid*: bool
 
 # Event
 type
@@ -77,3 +80,25 @@ type
   AuthFailInfo* = object
     peer*: PeerAddr
     smReason*: SmReason
+
+proc toString(x: openArray[uint8]): string =
+  let size = x.len
+  var buf = newSeqOfCap[string](size)
+  for i in 0 ..< size:
+    let val = x[i]
+    buf.add(&"{val:02x}")
+  result = buf.join(":")
+
+proc `$`*(key: RemoteCollectionKeys): string =
+  var buf = newSeqOfCap[string](10)
+  buf.add("--- RemoteCollectionKeys ---")
+  buf.add(&"* Authentication: {key.auth}")
+  buf.add(&"* EncKeySize: {key.encKeysize}")
+  buf.add(&"* IRK:  {key.irk.toString}")
+  buf.add(&"* LTK:  {key.ltk.toString}")
+  buf.add(&"* CSRK: {key.csrk.toString}")
+  buf.add(&"* Rand: {key.rand.toString}")
+  buf.add(&"* Ediv: 0x{key.ediv:04x}")
+  buf.add(&"* Authorized: {key.authorized}")
+  buf.add(&"* Valid: {key.valid}")
+  result = buf.join("\n")

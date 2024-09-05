@@ -96,3 +96,21 @@ func str2uuid*(s: string): Option[Uuid] =
       let val = concatUuid[idx..(idx + 1)].parseHexInt().uint8
       uuid128[i] = val
     result = some(Uuid(uuidType: Uuid128, uuid128: uuid128))
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc bdAddr2string*(x: uint64): string =
+  var octets: array[6, string]
+  for idx in 0 ..< 6:
+    let octet = ((x shr (idx * 8)) and 0xff).uint8
+    octets[5 - idx] = &"{octet:02X}"
+  result = octets.join(":")
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: PeerAddr): string =
+  let addrType = if x.addrType == AddrType.Random: "Random" else: "Public"
+  let address = x.address.bdAddr2string()
+  result = &"{address}({addrType})"

@@ -5,6 +5,7 @@ import std/strutils
 import std/times
 import ./common/common_types
 import ../lib/syslog
+export bdAddr2string
 
 # ------------------------------------------------------------------------------
 #
@@ -209,16 +210,6 @@ proc setUuid*(buf: var openArray[uint8|char], pos: int, uuid: Uuid) =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc bdAddr2string*(x: uint64): string =
-  var octets: array[6, string]
-  for idx in 0 ..< 6:
-    let octet = ((x shr (idx * 8)) and 0xff).uint8
-    octets[5 - idx] = &"{octet:02X}"
-  result = octets.join(":")
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
 proc string2bdAddr*(x: string): Option[uint64] =
   var address: uint64
   try:
@@ -232,6 +223,18 @@ proc string2bdAddr*(x: string): Option[uint64] =
     let err = getCurrentExceptionMsg()
     let errmsg = &"! string2bdAddr: caught exception, \"{err}\"."
     syslog.error(errmsg)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc toBdAddr*(x: string, random: bool = false): Option[PeerAddr] =
+  let address_opt = x.string2bdAddr()
+  if address_opt.isNone:
+    return
+  var res: PeerAddr
+  res.addrType = if random: AddrType.Random else: AddrType.Public
+  res.address = address_opt.get()
+  result = some(res)
 
 # ------------------------------------------------------------------------------
 #
