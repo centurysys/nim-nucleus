@@ -1,4 +1,5 @@
 import std/asyncdispatch
+import std/json
 import std/options
 import std/sequtils
 import std/strformat
@@ -20,6 +21,7 @@ type
     name*: Option[string]
     rssi*: int8
     seenTime*: Time
+    keys: RemoteCollectionKeys
   BleDevice* = ref BleDeviceObj
   DeviceWait = object
     waitDeviceQueue: Mailbox[BleDevice]
@@ -32,7 +34,7 @@ type
     running: bool
     scan: ScanState
     eventQueue: AsyncQueue[string]
-    devices: Table[uint64, BleDevice]
+    devices: Table[PeerAddr, BleDevice]
     waiter: DeviceWait
   BleNim* = ref BleNimObj
   GattObj = object
@@ -60,13 +62,72 @@ proc advertisingHandler(self: BleNim) {.async.} =
     device.name = report.name
     device.rssi = report.rssi
     device.seenTime = now().toTime
-    self.devices[report.peer.address] = device
+    self.devices[report.peer] = device
     if self.waiter.waiting and (not self.waiter.waitDeviceQueue.full):
       await self.waiter.waitDeviceQueue.put(device)
 
 # ==============================================================================
 # Event
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# SM: LE ローカルセキュリティ設定通知 保存
+# ------------------------------------------------------------------------------
+proc setLocalSecurityData(self: BleNim, localSecurity: LocalSecurity) =
+  let peer = localSecurity.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.auth = localSecurity.auth
+    device.keys.encKeySize = localSecurity.encKeySize
+    device.keys.authorized = localSecurity.authorization
+
+# ------------------------------------------------------------------------------
+# SM: LE LTK 受信通知 保存
+# ------------------------------------------------------------------------------
+proc setLtk(self: BleNim, peerLtk: LtkEvent) =
+  let peer = peerLtk.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.ltk = peerLtk.ltk
+
+# ------------------------------------------------------------------------------
+# SM: LE EDIV Rand 受信通知 保存
+# ------------------------------------------------------------------------------
+proc setEdivRand(self: BleNim, edivRand: EdivRandEvent) =
+  let peer = edivRand.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.ediv = edivRand.ediv
+    device.keys.rand = edivRand.rand
+
+# ------------------------------------------------------------------------------
+# SM: LE IRK 受信通知 保存
+# ------------------------------------------------------------------------------
+proc setIrk(self: BleNim, peerIrk: IrkEvent) =
+  let peer = peerIrk.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.irk = peerIrk.irk
+
+# ------------------------------------------------------------------------------
+# SM: LE CSRK 受信通知 保存
+# ------------------------------------------------------------------------------
+proc setCsrk(self: BleNim, peerCsrk: CsrkEvent) =
+  let peer = peerCsrk.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.csrk = peerCsrk.csrk
+
+# ------------------------------------------------------------------------------
+# SM: LE 認証完了通知 保存
+# ------------------------------------------------------------------------------
+proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
+  let peer = authComplete.peer
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    device.keys.valid = true
+    device.keys.peer = peer
+    device.keys.bdAddrStr = peer.address.bdAddr2string()
 
 # ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
@@ -77,6 +138,36 @@ proc eventHandler(self: BleNim) {.async.} =
     let notify_opt = payload.parseEvent()
     if notify_opt.isNone:
       continue
+    let notify = notify_opt.get()
+    let opc = notify.opc
+    echo &"*** Event: OPC: [{opc:04X}]"
+    case notify.opc
+    of BTM_D_OPC_BLE_SM_LOCAL_SECURITY_PROPERTY_EVT:
+      # LE ローカルセキュリティ設定通知
+      let data = notify.localSecurityData
+      self.setLocalSecurityData(data)
+    of BTM_D_OPC_BLE_SM_LTK_RECEIVE_EVT:
+      # LE LTK 受信通知
+      let data = notify.peerLtkData
+      self.setLtk(data)
+    of BTM_D_OPC_BLE_SM_EDIV_RAND_RECEIVE_EVT:
+      # LE EDIV Rand 受信通知
+      let data = notify.peerEdivRandData
+      self.setEdivRand(data)
+    of BTM_D_OPC_BLE_SM_IRK_RECEIVE_EVT:
+      # LE IRK 受信通知
+      let data = notify.peerIrkData
+      self.setIrk(data)
+    of BTM_D_OPC_BLE_SM_CSRK_RECEIVE_EVT:
+      # LE CSRK 受信通知
+      let data = notify.peerCsrkData
+      self.setCsrk(data)
+    of BTM_D_OPC_BLE_SM_AUTHENTICATION_COMPLETE_EVT:
+      # LE 認証完了通知
+      let data = notify.authCompleteData
+      self.setAuthCompleted(data)
+    else:
+      discard
 
 # ------------------------------------------------------------------------------
 # API: async initialization
@@ -99,16 +190,22 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(debug = false, mode: SecurityMode, iocap: IoCap, initialize = false):
-    BleNim =
-  new result
-  result.ble = newBleClient(debug)
-  result.mode = mode
-  result.iocap = iocap
-  result.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
-  result.waiter.waiting = false
+proc newBleNim*(debug = false, debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
+    iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
+  let res = new BleNim
+  res.ble = newBleClient(debug, debug_stack)
+  res.mode = mode
+  res.iocap = iocap
+  res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
+  res.waiter.waiting = false
   if initialize:
-    discard waitFor result.init()
+    if not waitFor res.init():
+      return
+  result = res
+
+# ==============================================================================
+# Scanner
+# ==============================================================================
 
 # ------------------------------------------------------------------------------
 # API: Start/Stop Scanning
@@ -140,10 +237,6 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, filterDuplicates =
     result = await self.ble.setScanEnableReq(scanEnable = false, self.scan.filter)
     self.scan.enable = false
 
-# ==============================================================================
-# Scanner
-# ==============================================================================
-
 # ------------------------------------------------------------------------------
 # API: Get All devices
 # ------------------------------------------------------------------------------
@@ -169,9 +262,11 @@ proc findDeviceByAddr*(self: BleNim, bdAddr: string): Option[BleDevice] =
   if address_opt.isNone:
     return
   let address = address_opt.get()
-  let device = self.devices.getOrDefault(address, nil)
-  if device != nil:
-    result = some(device)
+  var device: BleDevice
+  for peer, dev in self.devices.pairs:
+    if peer.address == address:
+      result = some(device)
+      break
 
 # ------------------------------------------------------------------------------
 # API: Wait device
@@ -184,13 +279,14 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
 
   let devicesUpperCase = devices.mapIt(it.toUpper)
   if devicesUpperCase.len > 0:
-    for waitDevice in devicesUpperCase:
-      let device_opt = self.findDeviceByAddr(waitDevice)
+    for devWaiting in devicesUpperCase:
+      let device_opt = self.findDeviceByAddr(devWaiting)
       if device_opt.isSome:
         return device_opt
   if not self.waiter.fut_device.isNil:
-    discard self.waiter.fut_device.read()
-    self.waiter.fut_device = nil
+    if self.waiter.fut_device.finished:
+      discard self.waiter.fut_device.read()
+      self.waiter.fut_device = nil
   # not found
   let startTime = now().toTime.toUnixFloat()
   let endTime = startTime + timeout.float / 1000.0
@@ -217,17 +313,54 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
       return dev_opt
 
 # ==============================================================================
-# GATT
+# Security
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
-#
+# API: Setup Remote Collection Keys
 # ------------------------------------------------------------------------------
-proc `=destroy`(x: GattObj) =
+proc setRemoteCollectionKeys*(self: BleNim, keys: RemoteCollectionKeys):
+    Future[bool] {.async.} =
+  result = await self.ble.setRemoteCollectionKeyReq(keys)
+
+proc setRemoteCollectionKeys*(self: BleNim, keysJson: JsonNode): Future[bool] {.async.} =
   try:
-    discard waitFor x.gatt.disconnect()
+    let keys = keysJson.to(RemoteCollectionKeys)
+    result = await self.ble.setRemoteCollectionKeyReq(keys)
   except:
     discard
+
+# ------------------------------------------------------------------------------
+# API: Setup All Remote Collection Keys
+# ------------------------------------------------------------------------------
+proc setAllRemoteCollectionKeys*(self: BleNim, allKeys: seq[RemoteCollectionKeys]):
+    Future[int] {.async.} =
+  for keys in allKeys.items:
+    if keys.valid:
+      let res = await self.setRemoteCollectionKeys(keys)
+      if res:
+        result.inc
+
+proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[int] {.async.} =
+  try:
+    let allKeys = allKeysJson.to(seq[RemoteCollectionKeys])
+    result = await self.setAllRemoteCollectionKeys(allKeys)
+  except:
+    discard
+
+# ------------------------------------------------------------------------------
+# API: Get Remote Collection Keys (保存用)
+# ------------------------------------------------------------------------------
+proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
+  result = newSeqOfCap[RemoteCollectionKeys](5)
+  for device in self.devices.values:
+    let keys = device.keys
+    if keys.valid:
+      result.add(keys)
+
+# ==============================================================================
+# GATT
+# ==============================================================================
 
 # ------------------------------------------------------------------------------
 #
@@ -256,9 +389,9 @@ proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
 # ------------------------------------------------------------------------------
 # API: Connection
 # ------------------------------------------------------------------------------
-proc connect*(self: BleNim, device: string, random = false, timeout = 10 * 1000):
+proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1000):
     Future[Option[Gatt]] {.async.} =
-  let address_opt = device.string2bdAddr()
+  let address_opt = deviceAddr.string2bdAddr()
   if address_opt.isNone:
     return
   let address = address_opt.get()
@@ -283,43 +416,95 @@ proc readGattChar*(self: Gatt, uuid: string): Future[Option[seq[HandleValue]]] {
       0xffff'u16, uuid)
 
 # ------------------------------------------------------------------------------
+# API: Write Characteristics
+# ------------------------------------------------------------------------------
+proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string):
+    Future[bool] {.async.} =
+  result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+
+proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8): Future[bool] {.async.} =
+  result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+
+# ------------------------------------------------------------------------------
 # API: Read Descriptors
 # ------------------------------------------------------------------------------
 proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Option[seq[uint8]]] {.async.} =
   result = await self.gatt.gattReadCharacteristicDescriptors(handle)
 
+# ------------------------------------------------------------------------------
+# API: Write Descriptors
+# ------------------------------------------------------------------------------
+proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16): Future[bool] {.async.} =
+  result = await self.gatt.gattWriteCharacteristicDescriptors(handle, desc)
 
 
 when isMainModule:
+  import std/os
+  const KeysFile = "/tmp/ble_keys.json"
+
+  proc handleDevice(self: BleNim, dev: BleDevice) {.async.} =
+    echo "=== Device found."
+    echo &"* Address: {dev.bdAddrStr}"
+    if dev.name.isSome:
+      echo &"* Name: {dev.name.get}"
+    echo &"* RSSI: {dev.rssi} [dBm]"
+    for retry in 0 ..< 3:
+      echo &"* [{retry + 1}] Try to connect..."
+      let gatt_opt = await self.connect(dev)
+      if gatt_opt.isSome:
+        echo "---> connected"
+        let gatt = gatt_opt.get()
+        echo "wait..."
+        await sleepAsync(10 * 1000)
+        let value = await gatt.readGattChar(0x0010'u16)
+        echo value
+        await sleepAsync(5 * 1000)
+        if dev.keys.valid:
+          echo dev.keys
+        let allKeys = self.getAllRemoteCollectionKeys()
+        if allKeys.len > 0:
+          echo allKeys
+          echo %allKeys
+          KeysFile.writeFile((%allKeys).pretty)
+        echo "done."
+        break
+      else:
+        await sleepAsync(100)
+
   proc asyncMain() {.async.} =
-    let ble = newBleNim(mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
+    let ble = newBleNim(debug = true, mode = SecurityMode.Level2,
+        iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return
+    if fileExists(KeysFile):
+      let content = KeysFile.readFile().parseJson()
+      let res = await ble.setAllRemoteCollectionKeys(content)
+      echo &"*** restore AllKeys -> result: {res}"
     if not await ble.startStopScan(active = false, enable = true):
       echo "failed to start scannning!"
       return
     echo "* wait for scanning..."
-    while true:
-      let dev_opt = await ble.waitDevice(devices = @["cc:c1:aa:20:0d:61"],
-        timeout = 10000)
+    var
+      dev: BleDevice
+    for retry in 0 ..< 30:
+      echo &"[{retry + 1}] waiting..."
+      let dev_opt = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
+        timeout = 1000)
       if dev_opt.isNone:
-        break
-      let dev = dev_opt.get()
-      echo "=== Device found."
-      echo &"* Address: {dev.bdAddrStr}"
-      if dev.name.isSome:
-        echo &"* Name: {dev.name.get}"
-      echo &"* RSSI: {dev.rssi} [dBm]"
+        continue
+      dev = dev_opt.get()
+      discard await ble.startStopScan(active = false, enable = false)
+      await ble.handleDevice(dev)
       break
-    discard await ble.startStopScan(active = false, enable = false)
     let devices = ble.allDevices()
     echo &"* scanned devices num: {devices.len}"
 
   waitFor asyncMain()
 
 # old test
+#when isMainModule:
 when false:
-  import app
+  import nim_nucleus/app
   try:
     waitFor asyncMain()
   except:
