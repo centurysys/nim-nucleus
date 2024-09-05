@@ -2,8 +2,8 @@ import std/asyncdispatch
 import std/options
 import std/strformat
 import std/strutils
-import nim_nucleus/submodule
-import nim_nucleus/ble/util
+import ./submodule
+import ./ble/util
 
 # ------------------------------------------------------------------------------
 #
@@ -231,7 +231,7 @@ proc asyncMain*() {.async.} =
   when true:
     for retry in 0 ..< 3:
       echo &"------ start connecting to WT901BLE58 [{retry}]..."
-      let client_opt = await ble.connection("CC:C1:AA:20:0D:61", random = true)
+      let client_opt = await ble.connection("64:33:DB:86:5D:04", random = false)
       if client_opt.isSome:
         echo " ==> connected"
         let client = client_opt.get()
