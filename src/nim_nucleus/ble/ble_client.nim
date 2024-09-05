@@ -42,13 +42,13 @@ type
     gattResult*: int16
     payload*: string
   GattEvent = ref GattEventObj
-  GattQueuesObj* = object
+  GattMailboxesObj* = object
     gattId*: uint16
-    gattRespQueue: Mailbox[GattConfirm]
-    gattEventQueue: Mailbox[GattEvent]
-    gattNotifyQueue: Mailbox[GattHandleValue]
-  GattQueues* = ref GattQueuesObj
-  GattQueuesPtr* = ptr GattQueues
+    gattRespMbx: Mailbox[GattConfirm]
+    gattEventMbx: Mailbox[GattEvent]
+    gattNotifyMbx: Mailbox[GattHandleValue]
+  GattMailboxes* = ref GattMailboxesObj
+  GattMailboxesPtr* = ptr GattMailboxes
   BleClientObj = object
     debug: bool
     debugBtm: bool
@@ -59,23 +59,23 @@ type
     callbackInitialized: bool
     btmMode: BtmMode
     localAddr: array[6, uint8]
-    cmdQueue: Mailbox[string]
-    mainRespQueue: Mailbox[string]
-    mainAdvQueue: Mailbox[string]
-    mainEventQueue: Mailbox[string]
+    cmdMbx: Mailbox[string]
+    mainRespMbx: Mailbox[string]
+    mainAdvMbx: Mailbox[string]
+    mainEventMbx: Mailbox[string]
     waitingEvents: seq[uint16]
-    appEventQueue: Mailbox[string]
-    tblGattQueues: Table[uint16, GattQueues]
+    appEventMbx: Mailbox[string]
+    tblGattMailboxes: Table[uint16, GattMailboxes]
     gattClients: Table[uint16, GattClient]
     tblRemoteDevices: Table[PeerAddr, RemoteCollectionKeys]
   BleClient* = ref BleClientObj
   GattClientObj = object
     bleClient*: BleClient
-    cmdQueue: Mailbox[string]
+    cmdMbx: Mailbox[string]
     gattId*: uint16
     conHandle*: uint16
     features*: uint64
-    queues*: GattQueues
+    mailboxes*: GattMailboxes
     mtu*: uint16
   GattClient* = ref GattClientObj
 
@@ -160,72 +160,72 @@ proc errorLogCallback(ctx: pointer, log: array[8, uint8]) {.cdecl.} =
   return
 
 # ------------------------------------------------------------------------------
-# Put to Response Queue
+# Put to Response Mailbox
 # ------------------------------------------------------------------------------
 proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
-  if not self.mainRespQueue.full:
-    await self.mainRespQueue.put(data)
+  if not self.mainRespMbx.full:
+    await self.mainRespMbx.put(data)
     result = true
   else:
-    let errmsg = &"! putResponse: ResponseQueue is full, discarded OPC: [{opc:04X}] !"
+    let errmsg = &"! putResponse: ResponseMbx is full, discarded OPC: [{opc:04X}] !"
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
-# Put to Event Queue
+# Put to Event Mailbox
 # ------------------------------------------------------------------------------
 proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
   if opc in self.waitingEvents:
-    self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Queue.")
-    await self.appEventQueue.put(data)
+    self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Mailbox.")
+    await self.appEventMbx.put(data)
     result = true
   else:
-    if not self.mainEventQueue.full:
-      self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Main Event Queue.")
-      await self.mainEventQueue.put(data)
+    if not self.mainEventMbx.full:
+      self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Main Event Mailbox.")
+      await self.mainEventMbx.put(data)
       result = true
     else:
       let errmsg = &"! putEvent: EventQueue is full, discarded OPC: [{opc:04X}] !"
       syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
-# Put to Advertising Queue
+# Put to Advertising Mailbox
 # ------------------------------------------------------------------------------
 proc putAdvertising*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
-  if not self.mainAdvQueue.full:
-    await self.mainAdvQueue.put(data)
+  if not self.mainAdvMbx.full:
+    await self.mainAdvMbx.put(data)
     result = true
   else:
     let errmsg = &"! putAdvertising: AdvQueue is full, discarded OPC: [{opc:04X}] !"
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
-# Wait Response Queue
+# Wait Response Mailbox
 # ------------------------------------------------------------------------------
 proc waitResponse*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
-  let res_opt = await self.mainRespQueue.get(timeout)
+  let res_opt = await self.mainRespMbx.get(timeout)
   if res_opt.isSome:
     result = res_opt.get()
   else:
     syslog.error("! waitResponse: timeouted")
 
 # ------------------------------------------------------------------------------
-# Wait Event Queue
+# Wait Event Mailbox
 # ------------------------------------------------------------------------------
 proc waitEvent*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
-  let res_opt = await self.mainEventQueue.get(timeout)
+  let res_opt = await self.mainEventMbx.get(timeout)
   if res_opt.isSome:
     result = res_opt.get()
   else:
     syslog.error("! waitEvent: timeouted")
 
 # ------------------------------------------------------------------------------
-# Wait Event Queue (for Applications)
+# Wait Event Mailbox (for Applications)
 # ------------------------------------------------------------------------------
 proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
     oneshot = false): Future[Option[string]] {.async.} =
   if events.len > 0:
     self.waitingEvents = events
-    result = await self.appEventQueue.get(timeout)
+    result = await self.appEventMbx.get(timeout)
   if events.len == 0 or oneshot:
     self.waitingEvents.setLen(0)
 
@@ -233,7 +233,7 @@ proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
 # Wait Advertising
 # ------------------------------------------------------------------------------
 proc waitAdvertising*(self: BleClient): Future[string] {.async.} =
-  let res_opt = await self.mainAdvQueue.get()
+  let res_opt = await self.mainAdvMbx.get()
   if res_opt.isSome:
     result = res_opt.get()
 
@@ -244,13 +244,13 @@ proc gattResponseHandler(self: BleClient, opc: uint16, response: string) {.async
   if response.len != 6:
     return
   let gattId = response.getLe16(4)
-  if self.tblGattQueues.hasKey(gattId):
-    let queue = self.tblGattQueues[gattId]
+  if self.tblGattMailboxes.hasKey(gattId):
+    let mbx = self.tblGattMailboxes[gattId]
     let cfm = new GattConfirm
     cfm.opc = response.getOpc()
     cfm.gattId = gattId
     cfm.gattResult = response.getLeInt16(2)
-    await queue.gattRespQueue.put(cfm)
+    await mbx.gattRespMbx.put(cfm)
 
 # ------------------------------------------------------------------------------
 # Handle GATT Event
@@ -259,14 +259,14 @@ proc gattEventHandler(self: BleClient, opc: uint16, response: string) {.async.} 
   if response.len < 4:
     return
   let gattId = response.getLe16(4)
-  if self.tblGattQueues.hasKey(gattId):
-    let queue = self.tblGattQueues[gattId]
+  if self.tblGattMailboxes.hasKey(gattId):
+    let mbx = self.tblGattMailboxes[gattId]
     let event = new GattEvent
     event.opc = response.getOpc()
     event.gattId = gattId
     event.gattResult = response.getLeInt16(2)
     event.payload = response
-    await queue.gattEventQueue.put(event)
+    await mbx.gattEventMbx.put(event)
 
 # ------------------------------------------------------------------------------
 # Handle GATT Notify
@@ -282,13 +282,13 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
     return
   let event = event_opt.get()
   let gattId = event.common.gattId
-  if self.tblGattQueues.hasKey(gattId):
-    let queue = self.tblGattQueues[gattId]
-    if queue.gattNotifyQueue.full:
-      let errmsg = &"! {procName}: Notify Queue (gattID: {gattId}) is full!"
+  if self.tblGattMailboxes.hasKey(gattId):
+    let mbx = self.tblGattMailboxes[gattId]
+    if mbx.gattNotifyMbx.full:
+      let errmsg = &"! {procName}: Notify Mailbox (gattID: {gattId}) is full!"
       syslog.error(errmsg)
       return
-    await queue.gattNotifyQueue.put(event)
+    await mbx.gattNotifyMbx.put(event)
 
 # ------------------------------------------------------------------------------
 # BTM Task: Response Handler
@@ -346,7 +346,7 @@ proc responseHandler(self: BleClient) {.async.} =
 # ==============================================================================
 proc taskSender(self: BleClient) {.async.} =
   while true:
-    let payload_opt = await self.cmdQueue.get()
+    let payload_opt = await self.cmdMbx.get()
     if payload_opt.isNone:
       continue
     let payload = payload_opt.get()
@@ -382,11 +382,11 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   discard initEvent(addr ev)
   discard initEvent(addr logEv)
   result.event = addr ev
-  result.mainAdvQueue = newMailbox[string](10)
-  result.mainRespQueue = newMailbox[string](5)
-  result.mainEventQueue = newMailbox[string](5)
-  result.appEventQueue = newMailbox[string](5)
-  result.cmdQueue = newMailbox[string](8)
+  result.mainAdvMbx = newMailbox[string](10)
+  result.mainRespMbx = newMailbox[string](5)
+  result.mainEventMbx = newMailbox[string](5)
+  result.appEventMbx = newMailbox[string](5)
+  result.cmdMbx = newMailbox[string](8)
   result.debug = debug
   result.debugBtm = debug_stack
 
@@ -421,7 +421,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
     syslog.error(errmsg)
     return
   self.debugEcho("wait...")
-  let pkt_opt = await self.mainRespQueue.get()
+  let pkt_opt = await self.mainRespMbx.get()
   if pkt_opt.isNone:
     return
   let pkt = pkt_opt.get()
@@ -436,7 +436,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
 proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
   if not self.bmtStarted:
     return
-  await self.cmdQueue.put(payload)
+  await self.cmdMbx.put(payload)
   result = true
 
 # ------------------------------------------------------------------------------
@@ -495,8 +495,8 @@ proc processEvent*(self: BleClient, opc: uint16, payload: string) {.async.} =
 # ------------------------------------------------------------------------------
 proc waitConfirm*(self: GattClient, timeout = 0): Future[GattConfirm] {.async.} =
   try:
-    let queue = self.queues.gattRespQueue
-    let res_opt = await queue.get(timeout)
+    let mbx = self.mailboxes.gattRespMbx
+    let res_opt = await mbx.get(timeout)
     if res_opt.isSome:
       result = res_opt.get
   except:
@@ -507,8 +507,8 @@ proc waitConfirm*(self: GattClient, timeout = 0): Future[GattConfirm] {.async.} 
 # ------------------------------------------------------------------------------
 proc waitEvent*(self: GattClient, timeout = 0): Future[GattEvent] {.async.} =
   try:
-    let queue = self.queues.gattEventQueue
-    let res_opt = await queue.get(timeout)
+    let mbx = self.mailboxes.gattEventMbx
+    let res_opt = await mbx.get(timeout)
     if res_opt.isSome:
       result = res_opt.get()
   except:
@@ -519,8 +519,8 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[GattEvent] {.async.} =
 # ------------------------------------------------------------------------------
 proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async.} =
   try:
-    let queue = self.queues.gattNotifyQueue
-    let res_opt = await queue.get(timeout)
+    let mbx = self.mailboxes.gattNotifyMbx
+    let res_opt = await mbx.get(timeout)
     if res_opt.isSome:
       result = res_opt.get()
     else:
@@ -534,7 +534,7 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async
 # ------------------------------------------------------------------------------
 proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
     Future[bool] {.async.} =
-  await self.cmdQueue.put(payload)
+  await self.cmdMbx.put(payload)
   let res = await self.waitConfirm()
   if res.opc != expOpc:
     syslog.error(&"! gattSend: OPC in response mismatch, {res.opc:04x} != {expOpc:04x}")
@@ -581,29 +581,29 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc newGattQueues(self: BleClient, gattId: uint16): GattQueues =
+proc newGattQueues(self: BleClient, gattId: uint16): GattMailboxes =
   new result
   result.gattId = gattID
-  result.gattRespQueue = newMailbox[GattConfirm](4)
-  result.gattEventQueue = newMailbox[GattEvent](16)
-  result.gattNotifyQueue = newMailbox[GattHandleValue](6)
+  result.gattRespMbx = newMailbox[GattConfirm](4)
+  result.gattEventMbx = newMailbox[GattEvent](16)
+  result.gattNotifyMbx = newMailbox[GattHandleValue](6)
 
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
 proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
     Option[GattClient] =
-  if self.tblGattQueues.hasKey(gattId):
+  if self.tblGattMailboxes.hasKey(gattId):
     return
   let client = new GattClient
-  let gattQueues = self.newGattQueues(gattId)
-  self.tblGattQueues[gattId] = gattQueues
+  let GattMailboxes = self.newGattQueues(gattId)
+  self.tblGattMailboxes[gattId] = GattMailboxes
   self.gattClients[gattId] = client
   client.bleClient = self
-  client.cmdQueue = self.cmdQueue
+  client.cmdMbx = self.cmdMbx
   client.gattId = gattId
   client.conHandle = conHandle
-  client.queues = gattQueues
+  client.mailboxes = GattMailboxes
   result = some(client)
 
 # ------------------------------------------------------------------------------
@@ -611,9 +611,9 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
 # ------------------------------------------------------------------------------
 proc deregister*(self: BleClient, client: GattClient): bool =
   let gattId = client.gattId
-  if not self.tblGattQueues.hasKey(gattId):
+  if not self.tblGattMailboxes.hasKey(gattId):
     return
-  self.tblGattQueues.del(gattId)
+  self.tblGattMailboxes.del(gattId)
   self.gattClients.del(gattId)
   result = true
 
