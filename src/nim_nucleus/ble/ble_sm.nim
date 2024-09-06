@@ -80,7 +80,7 @@ proc setRemoteCollectionKeyReq*(self: BleClient, keys: RemoteCollectionKeys):
 # ------------------------------------------------------------------------------
 # 1.3.11 LE リモートデバイス Key 削除要求
 # ------------------------------------------------------------------------------
-proc deleteRemoteDeviceKeyReq*(self: BleClient, device: RemoteDevice):
+proc deleteRemoteDeviceKeyReq*(self: BleClient, device: PeerAddr):
     Future[bool] {.async.} =
   const
     procName = "deleteRemoteDeviceKeyReq"
@@ -89,7 +89,7 @@ proc deleteRemoteDeviceKeyReq*(self: BleClient, device: RemoteDevice):
   var buf: array[9, uint8]
   buf.setOpc(0, reqOpc)
   buf[2] = device.addrType.uint8
-  buf.setBdAddr(3, device.bdAddr)
+  buf.setBdAddr(3, device.address)
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
 # ------------------------------------------------------------------------------
