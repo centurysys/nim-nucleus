@@ -38,6 +38,7 @@ type
     waiter: DeviceWait
   BleNim* = ref BleNimObj
   GattObj = object
+    ble: BleNim
     gatt: GattClient
     peer: PeerAddr
   Gatt* = ref GattObj
@@ -357,6 +358,20 @@ proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
     if keys.valid:
       result.add(keys)
 
+# ------------------------------------------------------------------------------
+# API: Remove Remote Collection Keys
+# ------------------------------------------------------------------------------
+proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.async.} =
+  let device = self.devices.getOrDefault(peer)
+  if device.isNil:
+    return
+  let res = await self.ble.deleteRemoteDeviceKeyReq(peer)
+  if not res:
+    return
+  zeroMem(addr device.keys, device.keys.sizeof)
+  device.keys.valid = false
+  result = true
+
 # ==============================================================================
 # GATT
 # ==============================================================================
@@ -373,6 +388,7 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   let res = new Gatt
   res.gatt = client_opt.get()
   res.peer = connParams.peer
+  res.ble = self
   result = some(res)
 
 # ------------------------------------------------------------------------------
@@ -400,8 +416,10 @@ proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1
 # ------------------------------------------------------------------------------
 # API: Disconnect
 # ------------------------------------------------------------------------------
-proc disconnect*(self: Gatt) {.async.} =
+proc disconnect*(self: Gatt, unpair = false) {.async.} =
   discard await self.gatt.disconnect()
+  if unpair:
+    discard await self.ble.removeRemoteCollectionKeys(self.peer)
   self.gatt = nil
 
 # ------------------------------------------------------------------------------
