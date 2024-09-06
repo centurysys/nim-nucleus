@@ -3,10 +3,24 @@ import std/options
 import ./asyncsync
 
 type
-  MailboxObj[T] = object of RootObj
+  MailboxObj[T] = object
     queue: AsyncQueue[T]
     fut: Future[T]
   Mailbox*[T] = ref MailboxObj[T]
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `=destroy`[T](x: MailboxObj[T]) =
+  try:
+    if not x.fut.isNil:
+      if x.fut.finished:
+        discard x.fut.read()
+      else:
+        let err = new IOError
+        x.fut.fail(err)
+  except:
+    discard
 
 # ------------------------------------------------------------------------------
 # Constructor:
