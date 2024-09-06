@@ -454,6 +454,14 @@ proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Option[seq[uint8]]]
 proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16): Future[bool] {.async.} =
   result = await self.gatt.gattWriteCharacteristicDescriptors(handle, desc)
 
+# ------------------------------------------------------------------------------
+# API: Wait Notification
+# ------------------------------------------------------------------------------
+proc waitNotification*(self: Gatt, timeout = 0): Future[Option[GattHandleValue]] {.async.} =
+  let res = await self.gatt.waitNotify(timeout)
+  if res.handle != 0:
+    result = some(res)
+
 
 when isMainModule:
   import std/os
