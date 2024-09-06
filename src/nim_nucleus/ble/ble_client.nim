@@ -493,24 +493,20 @@ proc processEvent*(self: BleClient, opc: uint16, payload: string) {.async.} =
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitConfirm*(self: GattClient, timeout = 0): Future[GattConfirm] {.async.} =
+proc waitConfirm*(self: GattClient, timeout = 0): Future[Option[GattConfirm]] {.async.} =
   try:
     let mbx = self.mailboxes.gattRespMbx
-    let res_opt = await mbx.get(timeout)
-    if res_opt.isSome:
-      result = res_opt.get
+    result = await mbx.get(timeout)
   except:
     discard
 
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitEvent*(self: GattClient, timeout = 0): Future[GattEvent] {.async.} =
+proc waitEvent*(self: GattClient, timeout = 0): Future[Option[GattEvent]] {.async.} =
   try:
     let mbx = self.mailboxes.gattEventMbx
-    let res_opt = await mbx.get(timeout)
-    if res_opt.isSome:
-      result = res_opt.get()
+    result = await mbx.get(timeout)
   except:
     discard
 
@@ -535,7 +531,10 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async
 proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
     Future[bool] {.async.} =
   await self.cmdMbx.put(payload)
-  let res = await self.waitConfirm()
+  let res_opt = await self.waitConfirm()
+  if res_opt.isNone:
+    return
+  let res = res_opt.get()
   if res.opc != expOpc:
     syslog.error(&"! gattSend: OPC in response mismatch, {res.opc:04x} != {expOpc:04x}")
     return
@@ -553,7 +552,10 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
     Future[Option[string]] {.async.} =
   if not await self.gattSend(payload, cfmOpc):
     return
-  let response = await self.waitEvent()
+  let res_opt = await self.waitEvent()
+  if res_opt.isNone:
+    return
+  let response = res_opt.get()
   let resOpc = response.payload.getOpc()
   if  resOpc != evtOpc:
     syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
@@ -569,7 +571,10 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
     return
   var payloads = newSeqOfCap[string](5)
   while true:
-    let response = await self.waitEvent()
+    let res_opt = await self.waitEvent()
+    if res_opt.isNone:
+      return
+    let response = res_opt.get()
     if response.gattResult != 0:
       return
     payloads.add(response.payload)

@@ -52,9 +52,10 @@ proc gattAllPrimaryServices*(self: GattClient): Future[Option[GattAllPrimaryServ
     return
   var res: GattAllPrimaryServices
   while true:
-    let response = await self.waitEvent(timeout = 30 * 1000)
-    if response.isNil:
+    let res_opt = await self.waitEvent(timeout = 30 * 1000)
+    if res_opt.isNone:
       break
+    let response = res_opt.get()
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -87,9 +88,10 @@ proc gattAllCharacteristicsOfService*(self: GattClient, startHandle: uint16,
     return
   var res: GattCharacteristicsOfService
   while true:
-    let response = await self.waitEvent(timeout = 30 * 1000)
-    if response.isNil:
+    let res_opt = await self.waitEvent(timeout = 30 * 1000)
+    if res_opt.isNone:
       break
+    let response = res_opt.get()
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -123,9 +125,10 @@ proc gattDiscoverCharacteristicsByUuid*(self: GattClient, startHandle: uint16,
     return
   var res: GattCharacteristicsOfService
   while true:
-    let response = await self.waitEvent(timeout = 30 * 1000)
-    if response.isNil:
+    let res_opt = await self.waitEvent(timeout = 30 * 1000)
+    if res_opt.isNone:
       break
+    let response = res_opt.get()
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
@@ -158,9 +161,10 @@ proc gattAllCharacteristicDescriptors*(self: GattClient, startHandle: uint16,
     return
   var res: GattAllCharacteristicDescriptors
   while true:
-    let response = await self.waitEvent(timeout = 30 * 1000)
-    if response.isNil:
+    let res_opt = await self.waitEvent(timeout = 30 * 1000)
+    if res_opt.isNone:
       return
+    let response = res_opt.get()
     let opc = response.payload.getOpc()
     case opc
     of evtOpc:
