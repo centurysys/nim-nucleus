@@ -262,8 +262,7 @@ proc findDeviceByAddr*(self: BleNim, bdAddr: string): Option[BleDevice] =
   if address_opt.isNone:
     return
   let address = address_opt.get()
-  var device: BleDevice
-  for peer, dev in self.devices.pairs:
+  for peer, device in self.devices.pairs:
     if peer.address == address:
       result = some(device)
       break
