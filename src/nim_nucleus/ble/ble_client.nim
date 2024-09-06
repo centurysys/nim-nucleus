@@ -582,7 +582,7 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc newGattQueues(self: BleClient, gattId: uint16): GattMailboxes =
+proc newGattMailboxes(self: BleClient, gattId: uint16): GattMailboxes =
   new result
   result.gattId = gattID
   result.gattRespMbx = newMailbox[GattConfirm](4)
@@ -597,7 +597,7 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   if self.tblGattMailboxes.hasKey(gattId):
     return
   let client = new GattClient
-  let GattMailboxes = self.newGattQueues(gattId)
+  let GattMailboxes = self.newGattMailboxes(gattId)
   self.tblGattMailboxes[gattId] = GattMailboxes
   self.gattClients[gattId] = client
   client.bleClient = self
