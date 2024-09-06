@@ -513,14 +513,10 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[Option[GattEvent]] {.asyn
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitNotify*(self: GattClient, timeout = 0): Future[GattHandleValue] {.async.} =
+proc waitNotify*(self: GattClient, timeout = 0): Future[Option[GattHandleValue]] {.async.} =
   try:
     let mbx = self.mailboxes.gattNotifyMbx
-    let res_opt = await mbx.get(timeout)
-    if res_opt.isSome:
-      result = res_opt.get()
-    else:
-      echo "?? NotifyQueue get failed."
+    result = await mbx.get(timeout)
   except:
     let err = getCurrentExceptionMsg()
     echo err

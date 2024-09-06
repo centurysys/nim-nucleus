@@ -458,9 +458,7 @@ proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16): Future[bool
 # API: Wait Notification
 # ------------------------------------------------------------------------------
 proc waitNotification*(self: Gatt, timeout = 0): Future[Option[GattHandleValue]] {.async.} =
-  let res = await self.gatt.waitNotify(timeout)
-  if res.handle != 0:
-    result = some(res)
+  result = await self.gatt.waitNotify(timeout)
 
 
 when isMainModule:
