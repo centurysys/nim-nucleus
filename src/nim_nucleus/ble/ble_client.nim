@@ -54,12 +54,13 @@ type
     debugBtm: bool
     bmtStarted: bool
     running: bool
-    lck: AsyncLock
     event: Event
     callbackInitialized: bool
     btmMode: BtmMode
     localAddr: array[6, uint8]
+    lck: AsyncLock
     cmdMbx: Mailbox[string]
+    gattMbx: Mailbox[string]
     mainRespMbx: Mailbox[string]
     mainAdvMbx: Mailbox[string]
     mainEventMbx: Mailbox[string]
@@ -67,11 +68,11 @@ type
     appEventMbx: Mailbox[string]
     tblGattMailboxes: Table[uint16, GattMailboxes]
     gattClients: Table[uint16, GattClient]
-    tblRemoteDevices: Table[PeerAddr, RemoteCollectionKeys]
   BleClient* = ref BleClientObj
   GattClientObj = object
     bleClient*: BleClient
     cmdMbx: Mailbox[string]
+    gattMbx: Mailbox[string]
     gattId*: uint16
     conHandle*: uint16
     features*: uint64
@@ -318,14 +319,14 @@ proc responseHandler(self: BleClient) {.async.} =
         discard await self.putAdvertising(opc, response)
       of OpcKind.MainResponses:
         self.debugEcho(" -> OPC_MAIN_RESPONSES")
-        releaseLock()
+        if self.lck.locked:
+          self.lck.release()
         discard await self.putResponse(opc, response)
       of OpcKind.MainEvents:
         self.debugEcho(" -> OPC_MAIN_EVENTS")
         discard await self.putEvent(opc, response)
       of OpcKind.GattClientConfirmations:
         self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
-        releaseLock()
         await self.gattResponseHandler(opc, response)
       of OpcKind.GattClientEvents:
         self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
@@ -345,20 +346,48 @@ proc responseHandler(self: BleClient) {.async.} =
 # BTM Task: Sender
 # ==============================================================================
 proc taskSender(self: BleClient) {.async.} =
+  var
+    fut_cmd: Future[Option[string]]
+    fut_gatt: Future[Option[string]]
+    fut_lck: Future[void]
   while true:
-    let payload_opt = await self.cmdMbx.get()
-    if payload_opt.isNone:
-      continue
-    let payload = payload_opt.get()
+    var
+      payload: string
+      isCmd: bool = false
+    payload.setLen(0)
+    if fut_cmd.isNil:
+      fut_cmd = self.cmdMbx.receive()
+    if fut_gatt.isNil:
+      fut_gatt = self.gattMbx.receive()
+    if fut_lck.isNil:
+      fut_lck = self.lck.acquire()
+    await (fut_cmd and fut_lck) or fut_gatt
+    if fut_lck.finished and fut_cmd.finished:
+      let payload_opt = fut_cmd.read()
+      fut_lck.read()
+      fut_cmd = nil
+      fut_lck = nil
+      if payload_opt.isNone:
+        self.lck.release()
+      else:
+        payload = payload_opt.get()
+        isCmd = true
+    if (not isCmd) and fut_gatt.finished:
+      let payload_opt = fut_gatt.read()
+      fut_gatt = nil
+      if payload_opt.isSome:
+        payload = payload_opt.get()
+      else:
+        continue
     if not self.bmtStarted:
       continue
-    #self.debugEcho(&"* sender: payload: {hexDump(payload)}")
-    await self.lck.acquire()
+    if payload.len == 0:
+      # ???
+      continue
     let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
-    if res != 0:
+    if res != 0 and isCmd and self.lck.locked:
       # コマンド送信失敗なので Lock をリリースする
-      if self.lck.locked:
-        self.lck.release()
+      self.lck.release()
 
 proc taskDummy(self: BleClient) {.async.} =
   while true:
@@ -387,6 +416,7 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   result.mainEventMbx = newMailbox[string](5)
   result.appEventMbx = newMailbox[string](5)
   result.cmdMbx = newMailbox[string](8)
+  result.gattMbx = newMailbox[string](8)
   result.debug = debug
   result.debugBtm = debug_stack
 
@@ -408,12 +438,12 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
           nullp, errorLogCallback.BTM_CB_ERROR_LOG_OUTPUT_FP, nullp)
       asyncCheck logHandler()
     self.lck = newAsyncLock()
+    self.lck.own()
     self.callbackInitialized = true
     asyncCheck self.taskDummy()
     asyncCheck self.responseHandler()
     asyncCheck self.taskSender()
   self.debugEcho("BTM_Start()")
-  self.lck.own()
   let res = BTM_Start(BTM_MODE_NORMAL)
   if res != 0:
     self.lck.release()
@@ -526,7 +556,7 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[Option[GattHandleValue]]
 # ------------------------------------------------------------------------------
 proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
     Future[bool] {.async.} =
-  await self.cmdMbx.put(payload)
+  await self.gattMbx.put(payload)
   let res_opt = await self.waitConfirm()
   if res_opt.isNone:
     return
@@ -597,14 +627,15 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   if self.tblGattMailboxes.hasKey(gattId):
     return
   let client = new GattClient
-  let GattMailboxes = self.newGattMailboxes(gattId)
-  self.tblGattMailboxes[gattId] = GattMailboxes
+  let gattMailboxes = self.newGattMailboxes(gattId)
+  self.tblGattMailboxes[gattId] = gattMailboxes
   self.gattClients[gattId] = client
   client.bleClient = self
   client.cmdMbx = self.cmdMbx
+  client.gattMbx = self.gattMbx
   client.gattId = gattId
   client.conHandle = conHandle
-  client.mailboxes = GattMailboxes
+  client.mailboxes = gattMailboxes
   result = some(client)
 
 # ------------------------------------------------------------------------------
