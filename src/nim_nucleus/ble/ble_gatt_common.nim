@@ -139,11 +139,11 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
     if msg_opt.isNone:
       continue
     let msg = msg_opt.get()
-    case msg.opc:
-    of BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT:
+    case msg.event:
+    of GapConenctionComplete:
       # LE Connection Complete 通知
       conHandle = some(msg.leConData.conHandle)
-    of BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT:
+    of GattCmnConnect:
       # GATT 接続通知
       let gattResult = msg.gattConData.common.gattResult
       if gattResult == 0:
