@@ -140,30 +140,28 @@ proc eventHandler(self: BleNim) {.async.} =
     if notify_opt.isNone:
       continue
     let notify = notify_opt.get()
-    let opc = notify.opc
-    echo &"*** Event: OPC: [{opc:04X}]"
-    case notify.opc
-    of BTM_D_OPC_BLE_SM_LOCAL_SECURITY_PROPERTY_EVT:
+    case notify.event
+    of SmLocalSecurityProperty:
       # LE ローカルセキュリティ設定通知
       let data = notify.localSecurityData
       self.setLocalSecurityData(data)
-    of BTM_D_OPC_BLE_SM_LTK_RECEIVE_EVT:
+    of SmLtkReceive:
       # LE LTK 受信通知
       let data = notify.peerLtkData
       self.setLtk(data)
-    of BTM_D_OPC_BLE_SM_EDIV_RAND_RECEIVE_EVT:
+    of SmEdivRandReceive:
       # LE EDIV Rand 受信通知
       let data = notify.peerEdivRandData
       self.setEdivRand(data)
-    of BTM_D_OPC_BLE_SM_IRK_RECEIVE_EVT:
+    of SmIrkReceive:
       # LE IRK 受信通知
       let data = notify.peerIrkData
       self.setIrk(data)
-    of BTM_D_OPC_BLE_SM_CSRK_RECEIVE_EVT:
+    of SmCsrkReceive:
       # LE CSRK 受信通知
       let data = notify.peerCsrkData
       self.setCsrk(data)
-    of BTM_D_OPC_BLE_SM_AUTHENTICATION_COMPLETE_EVT:
+    of SmAuthenticationComplete:
       # LE 認証完了通知
       let data = notify.authCompleteData
       self.setAuthCompleted(data)
