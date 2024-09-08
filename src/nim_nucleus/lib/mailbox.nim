@@ -90,3 +90,10 @@ proc receive*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.
 # ------------------------------------------------------------------------------
 proc get*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.} =
   result = await self.receive(timeout)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc contains*[T](self: Mailbox[T]): bool =
+  if not self.fut.isNil:
+    result = self.fut.finished
