@@ -15,14 +15,12 @@ import ./core/hci_status
 import ./core/opc
 import ./gatt/parsers
 import ./gatt/types
-import ./sm/types
 import ./util
 export opc
 export mailbox
 export GattEventCommon, GattHandleValue
 
 type
-  #GattId = distinct uint16
   CallbackMsg = ref object
     msg: string
     timestamp: DateTime
@@ -210,6 +208,13 @@ proc waitResponse*(self: BleClient, timeout: int = 0): Future[string] {.async.} 
     syslog.error("! waitResponse: timeouted")
 
 # ------------------------------------------------------------------------------
+# Clear Response Mailbox (if response exists)
+# ------------------------------------------------------------------------------
+proc clearResponse*(self: BleClient) {.async.} =
+  if self.mainRespMbx.contains:
+    discard await self.mainRespMbx.get()
+
+# ------------------------------------------------------------------------------
 # Wait Event Mailbox
 # ------------------------------------------------------------------------------
 proc waitEvent*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
@@ -295,10 +300,6 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
 # BTM Task: Response Handler
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
-  proc releaseLock() =
-    if self.lck.locked:
-      self.lck.release()
-
   while true:
     await self.event.ev.wait()
     self.event.ev.clear()
@@ -464,7 +465,8 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
 # Send Command
 # ------------------------------------------------------------------------------
 proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
-  if not self.bmtStarted:
+  await self.clearResponse()
+  if not self.bmtStarted or payload.len == 0:
     return
   await self.cmdMbx.put(payload)
   result = true
@@ -492,8 +494,7 @@ proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char], timeout = 0):
 # API: Send Request/Receive, Check Response
 # ------------------------------------------------------------------------------
 proc btmRequest*(self: BleClient, procName: string, payload: string,
-    expectedOpc: uint16, timeout = 0):
-    Future[bool] {.async.} =
+    expectedOpc: uint16, timeout = 0): Future[bool] {.async.} =
   let res_opt = await self.btmSendRecv(payload, timeout)
   if res_opt.isNone:
     let errmsg = &"! {procName}: failed"
@@ -508,13 +509,6 @@ proc btmRequest*(self: BleClient, procName: string, payload: string,
   let hciCode = response.getu8(2)
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   result = hciCode.checkHciStatus(procName)
-
-# ------------------------------------------------------------------------------
-# Process Event
-# ------------------------------------------------------------------------------
-proc processEvent*(self: BleClient, opc: uint16, payload: string) {.async.} =
-  discard
-
 
 # ==============================================================================
 # GATT Client
