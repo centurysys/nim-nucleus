@@ -16,8 +16,8 @@ type
     enable: bool
     filter: bool
   BleDeviceObj = object
-    bdAddr*: PeerAddr
-    bdAddrStr*: string
+    peer*: PeerAddr
+    peerAddrStr*: string
     name*: Option[string]
     rssi*: int8
     seenTime*: Time
@@ -58,8 +58,8 @@ proc advertisingHandler(self: BleNim) {.async.} =
       continue
     let report = report_opt.get()
     let device = new BleDevice
-    device.bdAddr = report.peer
-    device.bdAddrStr = bdAddr2string(report.peer.address)
+    device.peer = report.peer
+    device.peerAddrStr = bdAddr2string(report.peer.address)
     device.name = report.name
     device.rssi = report.rssi
     device.seenTime = now().toTime
@@ -128,7 +128,7 @@ proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
   if not device.isNil:
     device.keys.valid = true
     device.keys.peer = peer
-    device.keys.bdAddrStr = peer.address.bdAddr2string()
+    device.keys.peerAddrStr = peer.address.bdAddr2string()
 
 # ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
@@ -258,8 +258,8 @@ proc findDeviceByName*(self: BleNim, name: string): Option[BleDevice] =
 # ------------------------------------------------------------------------------
 # API: Find device by BD Address
 # ------------------------------------------------------------------------------
-proc findDeviceByAddr*(self: BleNim, bdAddr: string): Option[BleDevice] =
-  let address_opt = bdAddr.string2bdAddr()
+proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
+  let address_opt = peer.string2bdAddr()
   if address_opt.isNone:
     return
   let address = address_opt.get()
@@ -309,7 +309,7 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
       dev_opt = await self.waiter.fut_device
     self.waiter.fut_device = nil
     let devNew = dev_opt.get()
-    if devices.len == 0 or devNew.bdAddrStr in devicesUpperCase:
+    if devices.len == 0 or devNew.peerAddrStr in devicesUpperCase:
       return dev_opt
 
 # ==============================================================================
@@ -396,8 +396,8 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
 # ------------------------------------------------------------------------------
 proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
     Future[Option[Gatt]] {.async.} =
-  let address = device.bdAddr.address
-  let random = (device.bdAddr.addrType == AddrType.Random)
+  let address = device.peer.address
+  let random = (device.peer.addrType == AddrType.Random)
   let connParams = gattDefaultGattConnParams(address, random)
   result = await self.connect(connParams, timeout)
 
@@ -465,9 +465,18 @@ when isMainModule:
   import std/os
   const KeysFile = "/tmp/ble_keys.json"
 
+  proc notificationHandler(self: Gatt) {.async.} =
+    while true:
+      let val_opt = await self.waitNotification()
+      if val_opt.isNone:
+        break
+      let val = val_opt.get()
+      let values = val.values.mapIt(&"{it.uint8:02x}").join(", ")
+      echo &"** Notify: handle: 0x{val.handle:04x}, values: [{values}]"
+
   proc handleDevice(self: BleNim, dev: BleDevice) {.async.} =
     echo "=== Device found."
-    echo &"* Address: {dev.bdAddrStr}"
+    echo &"* Address: {dev.peerAddrStr}"
     if dev.name.isSome:
       echo &"* Name: {dev.name.get}"
     echo &"* RSSI: {dev.rssi} [dBm]"
@@ -477,18 +486,21 @@ when isMainModule:
       if gatt_opt.isSome:
         echo "---> connected"
         let gatt = gatt_opt.get()
+        asyncCheck gatt.notificationHandler()
         echo "wait..."
         await sleepAsync(10 * 1000)
-        let value = await gatt.readGattChar(0x0010'u16)
+        let value = await gatt.writeGattChar(0x0013'u16, 0x0002'u16)
         echo value
         await sleepAsync(5 * 1000)
+        await gatt.disconnect(unpair = false)
         if dev.keys.valid:
           echo dev.keys
         let allKeys = self.getAllRemoteCollectionKeys()
         if allKeys.len > 0:
           echo allKeys
-          echo %allKeys
-          KeysFile.writeFile((%allKeys).pretty)
+          KeysFile.writeFile($(%allKeys))
+        elif KeysFile.fileExists:
+          KeysFile.removeFile()
         echo "done."
         break
       else:
@@ -507,6 +519,9 @@ when isMainModule:
       echo "failed to start scannning!"
       return
     echo "* wait for scanning..."
+    for retry in countDown(10, 0):
+      echo &"[{retry}] waiting..."
+      await sleepAsync(1000)
     var
       dev: BleDevice
     for retry in 0 ..< 30:

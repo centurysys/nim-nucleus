@@ -33,7 +33,7 @@ type
 type
   RemoteCollectionKeys* = object
     peer*: PeerAddr
-    bdAddrStr*: string
+    peerAddrStr*: string
     auth*: Authentication
     encKeySize*: uint8
     irk*: array[16, uint8]
