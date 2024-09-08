@@ -35,6 +35,7 @@ type
     scan: ScanState
     eventQueue: AsyncQueue[string]
     devices: Table[PeerAddr, BleDevice]
+    bondedKeys: Table[PeerAddr, RemoteCollectionKeys]
     waiter: DeviceWait
   BleNim* = ref BleNimObj
   GattObj = object
@@ -129,6 +130,7 @@ proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
     device.keys.valid = true
     device.keys.peer = peer
     device.keys.peerAddrStr = peer.address.bdAddr2string()
+    self.bondedKeys[peer] = device.keys
 
 # ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
@@ -320,11 +322,14 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
 proc setRemoteCollectionKeys*(self: BleNim, keys: RemoteCollectionKeys):
     Future[bool] {.async.} =
   result = await self.ble.setRemoteCollectionKeyReq(keys)
+  if result:
+    let peer = keys.peer
+    self.bondedKeys[peer] = keys
 
 proc setRemoteCollectionKeys*(self: BleNim, keysJson: JsonNode): Future[bool] {.async.} =
   try:
     let keys = keysJson.to(RemoteCollectionKeys)
-    result = await self.ble.setRemoteCollectionKeyReq(keys)
+    result = await self.setRemoteCollectionKeys(keys)
   except:
     discard
 
@@ -351,8 +356,7 @@ proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[in
 # ------------------------------------------------------------------------------
 proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
   result = newSeqOfCap[RemoteCollectionKeys](5)
-  for device in self.devices.values:
-    let keys = device.keys
+  for keys in self.bondedKeys.values:
     if keys.valid:
       result.add(keys)
 
@@ -360,14 +364,16 @@ proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
 # API: Remove Remote Collection Keys
 # ------------------------------------------------------------------------------
 proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.async.} =
-  let device = self.devices.getOrDefault(peer)
-  if device.isNil:
+  let keys = self.bondedKeys.getOrDefault(peer)
+  if not keys.valid:
     return
+  let peer = keys.peer
   let res = await self.ble.deleteRemoteDeviceKeyReq(peer)
   if not res:
     return
-  zeroMem(addr device.keys, device.keys.sizeof)
-  device.keys.valid = false
+  let device = self.devices.getOrDefault(peer)
+  if not device.isNil:
+    zeroMem(addr device.keys, device.keys.sizeof)
   result = true
 
 # ==============================================================================
