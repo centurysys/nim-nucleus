@@ -478,6 +478,59 @@ when isMainModule:
       let values = val.values.mapIt(&"{it.uint8:02x}").join(", ")
       echo &"** Notify: handle: 0x{val.handle:04x}, values: [{values}]"
 
+  proc readBufferSize(self: Gatt): Future[Option[bool]] {.async.} =
+    const handle = 0x002e'u16
+    let cmd = @[0x02'u8, 0x00'u8, 0xd6'u8]
+    let res = await self.writeGattChar(handle, cmd)
+    if not res:
+      echo "??? write custom characteristic failed."
+      return
+    let buf_opt = await self.readGattChar(handle)
+    if buf_opt.isSome:
+      let buf = buf_opt.get()
+      echo buf.mapIt(&"{it:02x}")
+      result = some(buf[3] == 0x01'u8)
+
+  proc setBufferEnable(self: Gatt, enable: bool): Future[bool] {.async.} =
+    const handle = 0x002e'u16
+    let param = if enable: 0x01'u8 else: 0x00'u8
+    let cmd = @[0x03'u8, 0x01'u8, 0xa6'u8, param]
+    result = await self.writeGattChar(handle, cmd)
+    if not result:
+      echo "??? write custom characteristic failed."
+
+  proc setDateTime(self: Gatt): Future[bool] {.async.} =
+    const handle = 0x002e'u16
+    let now = now()
+    let year = (now.year - 2000).uint8
+    let cmd = @[0x08'u8, 0x01'u8, 0x01'u8,
+        year, now.month.uint8, now.monthday.uint8,
+        now.hour.uint8, now.minute.uint8, now.second.uint8]
+    echo cmd
+    result = await self.writeGattChar(handle, cmd)
+    echo &" setDateTime -> result: {result}"
+
+  proc handleGatt(self: Gatt) {.async.} =
+    asyncCheck self.notificationHandler()
+    let bufEnabled_opt = await self.readBufferSize()
+    if bufEnabled_opt.isSome:
+      let bufEnabled = bufEnabled_opt.get()
+      echo &"buffer enable: {bufEnabled}"
+      if not bufEnabled:
+        discard await self.setBufferEnable(true)
+      discard await self.setDateTime()
+    echo "wait..."
+    await sleepAsync(2 * 1000)
+    let model_opt = await self.readGattChar("2a24")
+    if model_opt.isSome:
+      let model = model_opt.get()[0]
+      echo &"* handle: 0x{model.handle:04x}"
+      echo &"* value: {model.value.toString}"
+    let res = await self.writeGattDescriptor(0x0013'u16, 0x0002'u16)
+    echo &"write CCC(Desc) -> {res}"
+    await sleepAsync(5 * 1000)
+    await self.disconnect(unpair = false)
+
   proc handleDevice(self: BleNim, dev: BleDevice) {.async.} =
     echo "=== Device found."
     echo &"* Address: {dev.peerAddrStr}"
@@ -490,25 +543,19 @@ when isMainModule:
       if gatt_opt.isSome:
         echo "---> connected"
         let gatt = gatt_opt.get()
-        asyncCheck gatt.notificationHandler()
-        echo "wait..."
-        await sleepAsync(10 * 1000)
-        let value = await gatt.writeGattChar(0x0013'u16, 0x0002'u16)
-        echo value
-        await sleepAsync(5 * 1000)
-        await gatt.disconnect(unpair = false)
-        if dev.keys.valid:
-          echo dev.keys
-        let allKeys = self.getAllRemoteCollectionKeys()
-        if allKeys.len > 0:
-          echo allKeys
-          KeysFile.writeFile($(%allKeys))
-        elif KeysFile.fileExists:
-          KeysFile.removeFile()
-        echo "done."
+        await gatt.handleGatt()
         break
       else:
         await sleepAsync(100)
+    if dev.keys.valid:
+      echo dev.keys
+    let allKeys = self.getAllRemoteCollectionKeys()
+    if allKeys.len > 0:
+      echo allKeys
+      KeysFile.writeFile($(%allKeys))
+    elif KeysFile.fileExists:
+      KeysFile.removeFile()
+    echo "done."
 
   proc asyncMain() {.async.} =
     let ble = newBleNim(debug = true, mode = SecurityMode.Level2,
@@ -519,7 +566,7 @@ when isMainModule:
       let content = KeysFile.readFile().parseJson()
       let res = await ble.setAllRemoteCollectionKeys(content)
       echo &"*** restore AllKeys -> result: {res}"
-    if not await ble.startStopScan(active = false, enable = true):
+    if not await ble.startStopScan(active = true, enable = true):
       echo "failed to start scannning!"
       return
     echo "* wait for scanning..."
@@ -528,6 +575,7 @@ when isMainModule:
       await sleepAsync(1000)
     var
       dev: BleDevice
+      scanStopped = false
     for retry in 0 ..< 30:
       echo &"[{retry + 1}] waiting..."
       let dev_opt = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
@@ -535,11 +583,14 @@ when isMainModule:
       if dev_opt.isNone:
         continue
       dev = dev_opt.get()
-      discard await ble.startStopScan(active = false, enable = false)
+      discard await ble.startStopScan(active = true, enable = false)
+      scanStopped = true
       await ble.handleDevice(dev)
       break
     let devices = ble.allDevices()
     echo &"* scanned devices num: {devices.len}"
+    if not scanStopped:
+      discard await ble.startStopScan(active = true, enable = false)
 
   waitFor asyncMain()
 
