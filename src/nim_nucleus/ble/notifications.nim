@@ -212,13 +212,13 @@ proc parseEvent*(payload: string): Option[Notification] =
           peerIrkData: data.get(), valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_SM_ADDRESS_INFORMATION_RECEIVE_EVT:
-    let data = payload.parseAddressInfoEvent(send = false)
+    let data = payload.parseAddressInfoReceiveEvent()
     if data.isSome:
       let res = Notification(event: SmAddressInformationReceive,
           peerAddressInfoData: data.get(), valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_SM_ADDRESS_INFORMATION_SEND_EVT:
-    let data = payload.parseAddressInfoEvent(send = true)
+    let data = payload.parseAddressInfoSendEvent()
     if data.isSome:
       let res = Notification(event: SmAddressInformationSend,
           peerAddressInfoData: data.get(), valid: true)
