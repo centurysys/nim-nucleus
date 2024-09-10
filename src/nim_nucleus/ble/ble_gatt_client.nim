@@ -218,6 +218,7 @@ proc gattReadUsingCharacteristicUuid*(self: GattClient, startHandle: uint16,
   if resp_opt.isNone:
     return
   let response = resp_opt.get()
+  self.bleClient.debugEcho(&"*** ReadUsingCharacteristicUuid: response: {response.hexDump}")
   let res_opt = response.parseGattReadUsingCharacteristicUuid()
   if res_opt.isNone:
     return
