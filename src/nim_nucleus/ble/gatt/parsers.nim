@@ -209,14 +209,15 @@ proc parseGattReadUsingCharacteristicUuid*(payload: string):
     res.common = payload.parseGattEventCommon()
     let nums = payload.getU8(6).int
     let eachLen = payload.getU8(7).int
-    res.values = newSeq[HandleValue](nums)
-    var pos = 8
-    for i in 0 ..< nums:
-      res.values[i].handle = payload.getLe16(pos)
-      res.values[i].value = newSeq[uint8](eachLen - 2)
-      copyMem(addr res.values[i].value[0], addr payload[pos + 2], eachLen - 2)
-      pos.inc(eachLen)
-    result = some(res)
+    if nums > 0:
+      res.values = newSeq[HandleValue](nums)
+      var pos = 8
+      for i in 0 ..< nums:
+        res.values[i].handle = payload.getLe16(pos)
+        res.values[i].value = newSeq[uint8](eachLen - 2)
+        copyMem(addr res.values[i].value[0], addr payload[pos + 2], eachLen - 2)
+        pos.inc(eachLen)
+      result = some(res)
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
