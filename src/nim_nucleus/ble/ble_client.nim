@@ -9,12 +9,12 @@ import ../lib/asyncsync
 import ../lib/mailbox
 import ../lib/syslog
 import ./btm
-import ./basic/types
 import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
 import ./gatt/parsers
 import ./gatt/types
+import ./notifications
 import ./util
 export opc
 export mailbox
@@ -91,7 +91,7 @@ var
 proc `=destroy`(x: BleClientObj) =
   try:
     if x.bmtStarted:
-      discard BTM_Start(BTM_MODE_SHUTDOWN)
+      discard btmStart(BtmMode.Shutdown)
   except:
     discard
 
@@ -114,12 +114,10 @@ proc debugEcho*(self: BleClient, msg: string, header = true) =
 # ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
-proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
+proc cmdCallback(buf: seq[byte]) =
   let callbackTime = now()
-  var buf = newString(dl)
-  copyMem(addr buf[0], df, dl)
   let msg = new CallbackMsg
-  msg.msg = buf
+  msg.msg = buf.toString
   msg.timestamp = callbackTime
   ev.deque.addLast(msg)
   ev.ev.fire()
@@ -128,15 +126,13 @@ proc callback(dl: cint, df: ptr uint8) {.cdecl.} =
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
 # ------------------------------------------------------------------------------
-proc debugLogCallback(ctx: pointer, text: cstring) {.cdecl.} =
-  let logtext = ($text).strip()
-  if logtext.len > 0:
-    let msg = new CallbackMsg
-    msg.msg = logtext
-    msg.timestamp = now()
-    logEv.deque.addLast(msg)
-    if not logEv.ev.isSet:
-      logev.ev.fire()
+proc debugLogCallback(logtext: string) =
+  let msg = new CallbackMsg
+  msg.msg = logtext
+  msg.timestamp = now()
+  logEv.deque.addLast(msg)
+  if not logEv.ev.isSet:
+    logev.ev.fire()
 
 # ------------------------------------------------------------------------------
 #
@@ -151,12 +147,6 @@ proc logHandler() {.async.} =
       let dateTime = msg.timestamp.format("yyyy/MM/dd HH:mm:ss")
       let logmsg = &"[BTM {dateTime}.{microSec:06d}] {msg.msg}"
       echo logmsg
-
-# ------------------------------------------------------------------------------
-# BTM Callback (error log)
-# ------------------------------------------------------------------------------
-proc errorLogCallback(ctx: pointer, log: array[8, uint8]) {.cdecl.} =
-  return
 
 # ------------------------------------------------------------------------------
 # Put to Response Mailbox
@@ -385,8 +375,8 @@ proc taskSender(self: BleClient) {.async.} =
     if payload.len == 0:
       # ???
       continue
-    let res = BTM_Send(payload.len.cint, cast[ptr uint8](addr payload[0]))
-    if res != 0 and isCmd and self.lck.locked:
+    let res = btmSend(payload)
+    if (not res) and isCmd and self.lck.locked:
       # コマンド送信失敗なので Lock をリリースする
       self.lck.release()
 
@@ -428,15 +418,14 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
   if self.bmtStarted:
     return true
   if not self.callbackInitialized:
-    let res = BTM_SetCallback(callback)
-    if res != 0:
+    discard setBtSnoopLog(true, "/tmp", (10 * 1024 * 1024).uint32)
+    let res = setCallback(cmdCallback)
+    if not res:
       let errmsg = &"! BleClient::init set callback failed with {res}."
       syslog.error(errmsg)
       return
     if self.debugBtm:
-      let nullp = cast[pointer](0)
-      discard BTM_SetLogOutputCallback(debugLogCallback.BTM_CB_DEBUG_LOG_OUTPUT_FP,
-          nullp, errorLogCallback.BTM_CB_ERROR_LOG_OUTPUT_FP, nullp)
+      discard setDebugLogCallback(debugLogCallback)
       asyncCheck logHandler()
     self.lck = newAsyncLock()
     self.lck.own()
@@ -445,8 +434,8 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
     asyncCheck self.responseHandler()
     asyncCheck self.taskSender()
   self.debugEcho("BTM_Start()")
-  let res = BTM_Start(BTM_MODE_NORMAL)
-  if res != 0:
+  let res = btmStart(BtmMode.Normal)
+  if not res:
     self.lck.release()
     let errmsg = &"! BleClient::init start BTM failed with {res}."
     syslog.error(errmsg)
@@ -546,6 +535,22 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[Option[GattHandleValue]]
     echo err
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc gattHandleExchangeMtuEvent*(self: GattClient, payload: string) =
+  let event_opt = payload.parseEvent()
+  if event_opt.isNone:
+    return
+  let event = event_opt.get()
+  if event.event != GattExchangeMtu:
+    # ???
+    return
+  let mtu = event.gattExchangeMtuData.serverMtu
+  let logmsg = &"* MTU changed, {mtu} [bytes]"
+  syslog.info(logmsg)
+  self.mtu = mtu
+
+# ------------------------------------------------------------------------------
 # API: GATT Client: Send Instruction -> Wait Confirmwation
 # ------------------------------------------------------------------------------
 proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
@@ -572,21 +577,28 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
     Future[Option[string]] {.async.} =
   if not await self.gattSend(payload, cfmOpc):
     return
-  let res_opt = await self.waitEvent()
-  if res_opt.isNone:
-    return
-  let response = res_opt.get()
-  let resOpc = response.payload.getOpc()
-  if  resOpc != evtOpc:
-    syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
-  else:
-    result = some(response.payload)
+  while true:
+    let res_opt = await self.waitEvent()
+    if res_opt.isNone:
+      return
+    let response = res_opt.get()
+    let resOpc = response.payload.getOpc()
+    if  resOpc != evtOpc:
+      if resOpc == BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
+        self.gattHandleExchangeMtuEvent(response.payload)
+        continue
+      else:
+        syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
+        break
+    else:
+      result = some(response.payload)
+      break
 
 # ------------------------------------------------------------------------------
 # API: Send Instrucion -> Wait Event(Multi)
 # ------------------------------------------------------------------------------
 proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
-    endOpc: uint16): Future[Option[seq[string]]] {.async.} =
+    evtOpc: uint16, endOpc: uint16): Future[Option[seq[string]]] {.async.} =
   if not await self.gattSend(payload, cfmOpc):
     return
   var payloads = newSeqOfCap[string](5)
@@ -597,10 +609,17 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
     let response = res_opt.get()
     if response.gattResult != 0:
       return
-    payloads.add(response.payload)
     let resOpc = response.payload.getOpc()
-    if resOpc == endOpc:
+    if resOpc == evtOpc:
+      payloads.add(response.payload)
+    elif resOpc == endOpc:
+      payloads.add(response.payload)
       break
+    elif resOpc == BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
+      self.gattHandleExchangeMtuEvent(response.payload)
+    else:
+      syslog.error(&"! gattSendRecvMulti: OPC in event mismatch, {resOpc:04x}")
+      return
   result = some(payloads)
 
 # ------------------------------------------------------------------------------
