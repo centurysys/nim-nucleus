@@ -158,6 +158,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
       let client_opt = self.newGattClient(gattId.get, conhandle.get)
       if client_opt.isSome:
         let client = client_opt.get()
+        client.peer = params.peer
         result = some(client)
       break
   discard await self.waitAppEvent(@[])

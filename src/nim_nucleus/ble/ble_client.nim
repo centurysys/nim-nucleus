@@ -69,6 +69,7 @@ type
   BleClient* = ref BleClientObj
   GattClientObj = object
     bleClient*: BleClient
+    peer*: PeerAddr
     cmdMbx: Mailbox[string]
     gattMbx: Mailbox[string]
     gattId*: uint16
@@ -545,8 +546,9 @@ proc gattHandleExchangeMtuEvent*(self: GattClient, payload: string) =
   if event.event != GattExchangeMtu:
     # ???
     return
+  let peerAddr = self.peer.address.bdAddr2string()
   let mtu = event.gattExchangeMtuData.serverMtu
-  let logmsg = &"* MTU changed, {mtu} [bytes]"
+  let logmsg = &"* MTU changed: peer {peerAddr}, {mtu} [bytes]"
   syslog.info(logmsg)
   self.mtu = mtu
 
