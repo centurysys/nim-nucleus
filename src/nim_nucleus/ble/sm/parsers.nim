@@ -129,10 +129,10 @@ proc parseIrkSendEvent*(payload: string): Option[IrkEvent] =
   result = payload.parseIrkEvent(true)
 
 # ------------------------------------------------------------------------------
-# LE Address Information 受信/送信通知
+# 1.3.22 LE Address Information 受信通知
 # ------------------------------------------------------------------------------
-proc parseAddressInfoEvent*(payload: string, send: bool): Option[AddressInfoEvent] =
-  let procName = &"parseAddressInfo{send.sendReceive}Event"
+proc parseAddressInfoReceiveEvent*(payload: string): Option[AddressInfoEvent] =
+  let procName = "parseAddressInfoReceiveEvent"
   if not checkPayloadLen(procName, payload, 16):
     return
   try:
@@ -147,16 +147,20 @@ proc parseAddressInfoEvent*(payload: string, send: bool): Option[AddressInfoEven
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
-# 1.3.22 LE Address Information 受信通知
-# ------------------------------------------------------------------------------
-proc parseAddressInfoReceiveEvent*(payload: string): Option[AddressInfoEvent] =
-  result = payload.parseAddressInfoEvent(false)
-
-# ------------------------------------------------------------------------------
 # 1.3.27 LE Address Information 送信通知
 # ------------------------------------------------------------------------------
 proc parseAddressInfoSendEvent*(payload: string): Option[AddressInfoEvent] =
-  result = payload.parseAddressInfoEvent(true)
+  let procName = "parseAddressInfoSendEvent"
+  if not checkPayloadLen(procName, payload, 9):
+    return
+  try:
+    var res: AddressInfoEvent
+    res.peer = payload.parsePeer()
+    result = some(res)
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! {procName}: caught exception, {err}"
+    syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
 # LE CSRK 受信/送信通知
