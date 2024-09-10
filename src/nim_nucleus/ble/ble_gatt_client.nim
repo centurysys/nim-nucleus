@@ -212,13 +212,10 @@ proc gattReadUsingCharacteristicUuid*(self: GattClient, startHandle: uint16,
   buf.setLe16(4, startHandle)
   buf.setLe16(6, endHandle)
   buf.setUuid(8, uuid)
-  let payload = buf.toString()
-  self.bleClient.debugEcho(&"*** ReadUsingCharacteristicUuid: payload: {payload.hexDump}")
   let resp_opt = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
   if resp_opt.isNone:
     return
   let response = resp_opt.get()
-  self.bleClient.debugEcho(&"*** ReadUsingCharacteristicUuid: response: {response.hexDump}")
   let res_opt = response.parseGattReadUsingCharacteristicUuid()
   if res_opt.isNone:
     return
