@@ -380,6 +380,21 @@ proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.a
 # GATT
 # ==============================================================================
 
+type
+  CharaUuid* {.pure.} = enum
+    DeviceName = "2a00"
+    Appearance = "2a01"
+    DateTime = "2a08"
+    BatteryLevel = "2a19"
+    ModelNumber = "2a24"
+    SerialNumber = "2a25"
+    FirmwareRevision = "2a26"
+    HardwareRevision = "2a27"
+    SoftwareRevision = "2a28"
+    ManufactureName = "2a29"
+    SystemId = "2a23"
+    RegCert = "2a2a"
+
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
@@ -436,6 +451,10 @@ proc readGattChar*(self: Gatt, uuid: string): Future[Option[seq[HandleValue]]] {
   result = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
       0xffff'u16, uuid)
 
+proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Option[seq[HandleValue]]] {.async.} =
+  result = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
+      0xffff'u16, $uuid)
+
 # ------------------------------------------------------------------------------
 # API: Write Characteristics
 # ------------------------------------------------------------------------------
@@ -466,6 +485,7 @@ proc waitNotification*(self: Gatt, timeout = 0): Future[Option[GattHandleValue]]
 
 
 when isMainModule:
+  import std/enumutils
   import std/os
   const KeysFile = "/tmp/ble_keys.json"
 
@@ -512,6 +532,14 @@ when isMainModule:
 
   proc handleGatt(self: Gatt) {.async.} =
     asyncCheck self.notificationHandler()
+    const items = [CharaUuid.DeviceName, CharaUuid.HardwareRevision,
+        CharaUuid.FirmwareRevision, CharaUuid.SoftwareRevision]
+    for item in items:
+      let handleValue_opt = await self.readGattChar(item)
+      if handleValue_opt.isSome:
+        let handleValue = handleValue_opt.get()[0]
+        echo &"* {item.symbolName} --> {handleValue.handle}, {handleValue.value.toString}"
+    await sleepAsync(1000)
     let bufEnabled_opt = await self.readBufferSize()
     if bufEnabled_opt.isSome:
       let bufEnabled = bufEnabled_opt.get()
@@ -558,8 +586,8 @@ when isMainModule:
     echo "done."
 
   proc asyncMain() {.async.} =
-    let ble = newBleNim(debug = true, mode = SecurityMode.Level2,
-        iocap = IoCap.NoInputNoOutput)
+    let ble = newBleNim(debug = true, debug_stack = true,
+        mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return
     if fileExists(KeysFile):
