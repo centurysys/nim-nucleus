@@ -13,3 +13,4 @@ bin           = @["nim_nucleus"]
 # Dependencies
 
 requires "nim >= 2.0.8"
+requires "results >= 0.5.0"

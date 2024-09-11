@@ -5,7 +5,9 @@ import std/strformat
 import std/strutils
 import std/tables
 import std/times
+import results
 import ../lib/asyncsync
+import ../lib/errcode
 import ../lib/mailbox
 import ../lib/syslog
 import ./btm
@@ -16,9 +18,9 @@ import ./gatt/parsers
 import ./gatt/types
 import ./notifications
 import ./util
-export opc
-export mailbox
-export GattEventCommon, GattHandleValue
+export results
+export opc, mailbox
+export GattEventCommon, GattHandleValue, ErrorCode
 
 type
   CallbackMsg = ref object
@@ -77,6 +79,9 @@ type
     features*: uint64
     mailboxes*: GattMailboxes
     mtu*: uint16
+    encrypted: bool
+    encryptionWait: AsyncLock
+    connected: bool
   GattClient* = ref GattClientObj
 
 const
@@ -122,7 +127,8 @@ proc cmdCallback(buf: seq[byte]) =
   msg.timestamp = callbackTime
   ev.deque.addLast(msg)
   ev.ev.fire()
-  poll(1)
+  if hasPendingOperations():
+    poll(1)
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
@@ -154,8 +160,9 @@ proc logHandler() {.async.} =
 # ------------------------------------------------------------------------------
 proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
   if not self.mainRespMbx.full:
-    await self.mainRespMbx.put(data)
-    result = true
+    let res = await self.mainRespMbx.put(data)
+    if res.isOk:
+      result = true
   else:
     let errmsg = &"! putResponse: ResponseMbx is full, discarded OPC: [{opc:04X}] !"
     syslog.error(errmsg)
@@ -166,13 +173,15 @@ proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.as
 proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
   if opc in self.waitingEvents:
     self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Application Event Mailbox.")
-    await self.appEventMbx.put(data)
-    result = true
+    let res = await self.appEventMbx.put(data)
+    if res.isOk:
+      result = true
   else:
     if not self.mainEventMbx.full:
       self.debugEcho(&"* putEvent: OPC: {opc:04X} --> Main Event Mailbox.")
-      await self.mainEventMbx.put(data)
-      result = true
+      let res = await self.mainEventMbx.put(data)
+      if res.isOk:
+        result = true
     else:
       let errmsg = &"! putEvent: EventQueue is full, discarded OPC: [{opc:04X}] !"
       syslog.error(errmsg)
@@ -182,8 +191,9 @@ proc putEvent*(self: BleClient, opc: uint16, data: string): Future[bool] {.async
 # ------------------------------------------------------------------------------
 proc putAdvertising*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
   if not self.mainAdvMbx.full:
-    await self.mainAdvMbx.put(data)
-    result = true
+    let res = await self.mainAdvMbx.put(data)
+    if res.isOk:
+      result = true
   else:
     let errmsg = &"! putAdvertising: AdvQueue is full, discarded OPC: [{opc:04X}] !"
     syslog.error(errmsg)
@@ -191,12 +201,12 @@ proc putAdvertising*(self: BleClient, opc: uint16, data: string): Future[bool] {
 # ------------------------------------------------------------------------------
 # Wait Response Mailbox
 # ------------------------------------------------------------------------------
-proc waitResponse*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
-  let res_opt = await self.mainRespMbx.get(timeout)
-  if res_opt.isSome:
-    result = res_opt.get()
-  else:
-    syslog.error("! waitResponse: timeouted")
+proc waitResponse*(self: BleClient, timeout: int = 0): Future[Result[string, ErrorCode]]
+    {.async.} =
+  result = await self.mainRespMbx.get(timeout)
+  if result.isErr:
+    let err = result.error
+    syslog.error(&"! waitResponse: {err}")
 
 # ------------------------------------------------------------------------------
 # Clear Response Mailbox (if response exists)
@@ -208,18 +218,18 @@ proc clearResponse*(self: BleClient) {.async.} =
 # ------------------------------------------------------------------------------
 # Wait Event Mailbox
 # ------------------------------------------------------------------------------
-proc waitEvent*(self: BleClient, timeout: int = 0): Future[string] {.async.} =
-  let res_opt = await self.mainEventMbx.get(timeout)
-  if res_opt.isSome:
-    result = res_opt.get()
-  else:
-    syslog.error("! waitEvent: timeouted")
+proc waitEvent*(self: BleClient, timeout: int = 0): Future[Result[string, ErrorCode]]
+    {.async.} =
+  result = await self.mainEventMbx.get(timeout)
+  if result.isErr:
+    let err = result.error
+    syslog.error(&"! waitEvent: {err}")
 
 # ------------------------------------------------------------------------------
 # Wait Event Mailbox (for Applications)
 # ------------------------------------------------------------------------------
 proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
-    oneshot = false): Future[Option[string]] {.async.} =
+    oneshot = false): Future[Result[string, ErrorCode]] {.async.} =
   if events.len > 0:
     self.waitingEvents = events
     result = await self.appEventMbx.get(timeout)
@@ -229,10 +239,8 @@ proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
 # ------------------------------------------------------------------------------
 # Wait Advertising
 # ------------------------------------------------------------------------------
-proc waitAdvertising*(self: BleClient): Future[string] {.async.} =
-  let res_opt = await self.mainAdvMbx.get()
-  if res_opt.isSome:
-    result = res_opt.get()
+proc waitAdvertising*(self: BleClient): Future[Result[string, ErrorCode]] {.async.} =
+  result = await self.mainAdvMbx.get()
 
 # ------------------------------------------------------------------------------
 # Handle GATT Confirm
@@ -247,7 +255,7 @@ proc gattResponseHandler(self: BleClient, opc: uint16, response: string) {.async
     cfm.opc = response.getOpc()
     cfm.gattId = gattId
     cfm.gattResult = response.getLeInt16(2)
-    await mbx.gattRespMbx.put(cfm)
+    discard await mbx.gattRespMbx.put(cfm)
 
 # ------------------------------------------------------------------------------
 # Handle GATT Event
@@ -263,7 +271,7 @@ proc gattEventHandler(self: BleClient, opc: uint16, response: string) {.async.} 
     event.gattId = gattId
     event.gattResult = response.getLeInt16(2)
     event.payload = response
-    await mbx.gattEventMbx.put(event)
+    discard await mbx.gattEventMbx.put(event)
 
 # ------------------------------------------------------------------------------
 # Handle GATT Notify
@@ -285,7 +293,7 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
       let errmsg = &"! {procName}: Notify Mailbox (gattID: {gattId}) is full!"
       syslog.error(errmsg)
       return
-    await mbx.gattNotifyMbx.put(event)
+    discard await mbx.gattNotifyMbx.put(event)
 
 # ------------------------------------------------------------------------------
 # BTM Task: Response Handler
@@ -339,8 +347,8 @@ proc responseHandler(self: BleClient) {.async.} =
 # ==============================================================================
 proc taskSender(self: BleClient) {.async.} =
   var
-    fut_cmd: Future[Option[string]]
-    fut_gatt: Future[Option[string]]
+    fut_cmd: Future[Result[string, ErrorCode]]
+    fut_gatt: Future[Result[string, ErrorCode]]
     fut_lck: Future[void]
   while true:
     var
@@ -355,20 +363,20 @@ proc taskSender(self: BleClient) {.async.} =
       fut_lck = self.lck.acquire()
     await (fut_cmd and fut_lck) or fut_gatt
     if fut_lck.finished and fut_cmd.finished:
-      let payload_opt = fut_cmd.read()
+      let payload_res = fut_cmd.read()
       fut_lck.read()
       fut_cmd = nil
       fut_lck = nil
-      if payload_opt.isNone:
+      if payload_res.isErr:
         self.lck.release()
       else:
-        payload = payload_opt.get()
+        payload = payload_res.get()
         isCmd = true
     if (not isCmd) and fut_gatt.finished:
-      let payload_opt = fut_gatt.read()
+      let payload_res = fut_gatt.read()
       fut_gatt = nil
-      if payload_opt.isSome:
-        payload = payload_opt.get()
+      if payload_res.isOk:
+        payload = payload_res.get()
       else:
         continue
     if not self.bmtStarted:
@@ -442,10 +450,10 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
     syslog.error(errmsg)
     return
   self.debugEcho("wait...")
-  let pkt_opt = await self.mainRespMbx.get()
-  if pkt_opt.isNone:
+  let pkt_res = await self.mainRespMbx.get()
+  if pkt_res.isErr:
     return
-  let pkt = pkt_opt.get()
+  let pkt = pkt_res.get()
   self.debugEcho(&"--> received: {pkt.len} bytes.")
   self.debugEcho(pkt.hexDump)
   self.bmtStarted = true
@@ -454,29 +462,28 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Send Command
 # ------------------------------------------------------------------------------
-proc btmSend(self: BleClient, payload: string): Future[bool] {.async.} =
+proc btmSend(self: BleClient, payload: string): Future[Result[bool, ErrorCode]]
+    {.async.} =
   await self.clearResponse()
   if not self.bmtStarted or payload.len == 0:
     return
-  await self.cmdMbx.put(payload)
-  result = true
+  result = await self.cmdMbx.put(payload)
 
 # ------------------------------------------------------------------------------
 # API: Send Command
 # ------------------------------------------------------------------------------
 proc btmSendRecv*(self: BleClient, payload: string, timeout = 0):
-    Future[Option[string]] {.async.} =
-  if not await self.btmSend(payload):
-    return
-  let res = await self.waitResponse(timeout)
-  if res.len > 0:
-    result = some(res)
+    Future[Result[string, ErrorCode]] {.async.} =
+  let res = await self.btmSend(payload)
+  if res.isErr:
+    return err(res.error)
+  result = await self.waitResponse(timeout)
 
 # ------------------------------------------------------------------------------
 # API: Send Command
 # ------------------------------------------------------------------------------
 proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char], timeout = 0):
-    Future[Option[string]] {.async.} =
+    Future[Result[string, ErrorCode]] {.async.} =
   let payload = buf.toString(buf.len)
   result = await self.btmSendRecv(payload, timeout)
 
@@ -485,12 +492,13 @@ proc btmSendRecv*(self: BleClient, buf: openArray[uint8|char], timeout = 0):
 # ------------------------------------------------------------------------------
 proc btmRequest*(self: BleClient, procName: string, payload: string,
     expectedOpc: uint16, timeout = 0): Future[bool] {.async.} =
-  let res_opt = await self.btmSendRecv(payload, timeout)
-  if res_opt.isNone:
-    let errmsg = &"! {procName}: failed"
+  let payload_res = await self.btmSendRecv(payload, timeout)
+  if payload_res.isErr:
+    let err = payload_res.error
+    let errmsg = &"! {procName}: failed, {err}"
     syslog.error(errmsg)
     return
-  let response = res_opt.get()
+  let response = payload_res.get()
   let resOpc = response.getOpc(0)
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
@@ -500,6 +508,41 @@ proc btmRequest*(self: BleClient, procName: string, payload: string,
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   result = hciCode.checkHciStatus(procName)
 
+# ------------------------------------------------------------------------------
+# API: Handle Encryption Change
+# ------------------------------------------------------------------------------
+proc handleEncryptionChange*(self: BleClient, conHandle: uint16, enable: bool):
+    Future[bool] {.async.} =
+  for gattId, gattClient in self.gattClients.pairs:
+    if gattClient.conHandle == conHandle:
+      if enable:
+        if not gattClient.encrypted:
+          gattClient.encrypted = true
+          if gattClient.encryptionWait.locked:
+            gattClient.encryptionWait.release()
+      else:
+        if gattClient.encrypted:
+          gattClient.encrypted = false
+      result = true
+      break
+
+# ------------------------------------------------------------------------------
+# API: Handle Disconnection
+# ------------------------------------------------------------------------------
+proc handleDisconnectionComplete*(self: BleClient, conHandle: uint16):
+    Future[Option[PeerAddr]] {.async.} =
+  for gattId, gattClient in self.gattClients.pairs:
+    if gattClient.conHandle == conHandle:
+      gattClient.connected = false
+      if gattClient.encryptionWait.locked:
+        let logmsg = &"* handleDisconnectionComplete: release EncryptionWait lock."
+        syslog.info(logmsg)
+        gattClient.encrypted = false
+        gattClient.encryptionWait.release()
+      let peer = gattClient.peer
+      result = some(peer)
+      break
+
 # ==============================================================================
 # GATT Client
 # ==============================================================================
@@ -507,30 +550,42 @@ proc btmRequest*(self: BleClient, procName: string, payload: string,
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitConfirm*(self: GattClient, timeout = 0): Future[Option[GattConfirm]] {.async.} =
+proc waitConfirm*(self: GattClient, timeout = 0): Future[Result[GattConfirm, ErrorCode]]
+    {.async.} =
   try:
     let mbx = self.mailboxes.gattRespMbx
-    result = await mbx.get(timeout)
+    if not self.connected:
+      result = err(ErrorCode.Disconnected)
+    else:
+      result = await mbx.get(timeout)
   except:
     discard
 
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitEvent*(self: GattClient, timeout = 0): Future[Option[GattEvent]] {.async.} =
+proc waitEvent*(self: GattClient, timeout = 0): Future[Result[GattEvent, ErrorCode]]
+    {.async.} =
   try:
     let mbx = self.mailboxes.gattEventMbx
-    result = await mbx.get(timeout)
+    if not self.connected:
+      result = err(ErrorCode.Disconnected)
+    else:
+      result = await mbx.get(timeout)
   except:
     discard
 
 # ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
-proc waitNotify*(self: GattClient, timeout = 0): Future[Option[GattHandleValue]] {.async.} =
+proc waitNotify*(self: GattClient, timeout = 0): Future[Result[GattHandleValue, ErrorCode]]
+    {.async.} =
   try:
     let mbx = self.mailboxes.gattNotifyMbx
-    result = await mbx.get(timeout)
+    if not self.connected:
+      result = err(ErrorCode.Disconnected)
+    else:
+      result = await mbx.get(timeout)
   except:
     let err = getCurrentExceptionMsg()
     echo err
@@ -556,34 +611,42 @@ proc gattHandleExchangeMtuEvent*(self: GattClient, payload: string) =
 # API: GATT Client: Send Instruction -> Wait Confirmwation
 # ------------------------------------------------------------------------------
 proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
-    Future[bool] {.async.} =
-  await self.gattMbx.put(payload)
-  let res_opt = await self.waitConfirm()
-  if res_opt.isNone:
-    return
-  let res = res_opt.get()
+    Future[Result[bool, ErrorCode]] {.async.} =
+  if not self.connected:
+    syslog.error("! gattSend: GATT Disconnected.")
+    return err(ErrorCode.Disconnected)
+  let put_res = await self.gattMbx.put(payload)
+  if put_res.isErr:
+    if put_res.error == ErrorCode.Disconnected:
+      syslog.error("! gattSend: GATT Disconnected.")
+    return err(put_res.error)
+  let mbx_res = await self.waitConfirm()
+  if mbx_res.isErr:
+    return err(ErrorCode.GattError)
+  let res = mbx_res.get()
   if res.opc != expOpc:
     syslog.error(&"! gattSend: OPC in response mismatch, {res.opc:04x} != {expOpc:04x}")
-    return
+    return err(ErrorCode.OpcMismatch)
   if res.gattResult != 0:
     let gattError = res.gattResult.gattResultToString()
     let errmsg = &"! gattSend: failed, {gattError}"
     syslog.error(errmsg)
-    return
-  result = true
+    return err(ErrorCode.GattError)
+  result = ok(true)
 
 # ------------------------------------------------------------------------------
 # API: Send Instrucion -> Wait Event
 # ------------------------------------------------------------------------------
 proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: uint16):
-    Future[Option[string]] {.async.} =
-  if not await self.gattSend(payload, cfmOpc):
-    return
+    Future[Result[string, ErrorCode]] {.async.} =
+  let send_res = await self.gattSend(payload, cfmOpc)
+  if send_res.isErr:
+    return err(send_res.error)
   while true:
-    let res_opt = await self.waitEvent()
-    if res_opt.isNone:
-      return
-    let response = res_opt.get()
+    let response_res = await self.waitEvent()
+    if response_res.isErr:
+      return err(response_res.error)
+    let response = response_res.get()
     let resOpc = response.payload.getOpc()
     if  resOpc != evtOpc:
       if resOpc == BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
@@ -591,24 +654,26 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
         continue
       else:
         syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
+        result = err(ErrorCode.OpcMismatch)
         break
     else:
-      result = some(response.payload)
+      result = ok(response.payload)
       break
 
 # ------------------------------------------------------------------------------
 # API: Send Instrucion -> Wait Event(Multi)
 # ------------------------------------------------------------------------------
 proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
-    evtOpc: uint16, endOpc: uint16): Future[Option[seq[string]]] {.async.} =
-  if not await self.gattSend(payload, cfmOpc):
-    return
+    evtOpc: uint16, endOpc: uint16): Future[Result[seq[string], GattError]] {.async.} =
+  let send_res = await self.gattSend(payload, cfmOpc)
+  if send_res.isErr:
+    return err(send_res.error)
   var payloads = newSeqOfCap[string](5)
   while true:
-    let res_opt = await self.waitEvent()
-    if res_opt.isNone:
-      return
-    let response = res_opt.get()
+    let response_res = await self.waitEvent()
+    if response_res.isErr:
+      return err(response_res.error)
+    let response = response_res.get()
     if response.gattResult != 0:
       return
     let resOpc = response.payload.getOpc()
@@ -621,8 +686,24 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
       self.gattHandleExchangeMtuEvent(response.payload)
     else:
       syslog.error(&"! gattSendRecvMulti: OPC in event mismatch, {resOpc:04x}")
+      result = err(ErrorCode.OpcMismatch)
       return
-  result = some(payloads)
+  result = ok(payloads)
+
+# ------------------------------------------------------------------------------
+# API: Wait Encryption Complete
+# ------------------------------------------------------------------------------
+proc waitEncryptionComplete*(self: GattClient): Future[Result[bool, ErrorCode]]
+    {.async.} =
+  if self.encrypted:
+    return ok(true)
+  self.encryptionWait.own()
+  await self.encryptionWait.acquire()
+  if not self.encrypted:
+    # maybe disconnected
+    result = err(ErrorCode.Disconnected)
+  else:
+    result = ok(true)
 
 # ------------------------------------------------------------------------------
 #
@@ -650,7 +731,9 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   client.gattMbx = self.gattMbx
   client.gattId = gattId
   client.conHandle = conHandle
+  client.encryptionWait = newAsyncLock()
   client.mailboxes = gattMailboxes
+  client.connected = true
   result = some(client)
 
 # ------------------------------------------------------------------------------

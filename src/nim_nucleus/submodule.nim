@@ -9,8 +9,10 @@ import ./ble/[
 ]
 import ./lib/[
   asyncsync,
+  errcode,
   syslog
 ]
+import results
 export
   ble_client,
   ble_gap,
@@ -20,4 +22,6 @@ export
   notifications,
   util,
   asyncsync,
-  syslog
+  errcode,
+  syslog,
+  results

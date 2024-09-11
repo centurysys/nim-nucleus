@@ -1,11 +1,16 @@
 import std/asyncdispatch
 import std/options
+import results
 import ./asyncsync
+import ./errcode
+export results
+export errcode
 
 type
   MailboxObj[T] = object
     queue: AsyncQueue[T]
     fut: Future[T]
+    closed: bool
   Mailbox*[T] = ref MailboxObj[T]
 
 # ------------------------------------------------------------------------------
@@ -44,51 +49,82 @@ proc empty*[T](self: Mailbox[T]): bool {.inline.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc send*[T](self: Mailbox[T], data: T) {.async.} =
+proc send*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.async.} =
+  if self.closed:
+    if not self.fut.isNil:
+      let err = new IOError
+      self.fut.fail(err)
+    return err(ErrorCode.Disconnected)
   await self.queue.put(data)
+  result = ok(true)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc put*[T](self: Mailbox[T], data: T) {.async.} =
+proc put*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.async.} =
+  if self.closed:
+    if not self.fut.isNil:
+      let err = new IOError
+      self.fut.fail(err)
+    return err(ErrorCode.Disconnected)
   await self.queue.put(data)
+  result = ok(true)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc sendNoWait*[T](self: Mailbox[T], data: T): bool =
+proc sendNoWait*[T](self: Mailbox[T], data: T): Result[bool, ErrorCode] =
+  if self.closed:
+    if not self.fut.isNil:
+      let err = new IOError
+      self.fut.fail(err)
+    return err(ErrorCode.Disconnected)
   if not self.queue.full:
     self.queue.putNoWait(data)
-    result = true
+    result = ok(true)
+  else:
+    result = err(ErrorCode.Full)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc putNoWait*[T](self: Mailbox[T], data: T): bool =
+proc putNoWait*[T](self: Mailbox[T], data: T): Result[bool, ErrorCode] =
   result = self.sendNoWait(data)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc receive*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.} =
+proc close*[T](self: Mailbox[T]) =
+  self.closed = true
+  if not self.fut.isNil:
+    let err = new IOError
+    self.fut.fail(err)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc receive*[T](self: Mailbox[T], timeout: int = 0): Future[Result[T, ErrorCode]]
+    {.async.} =
+  if self.closed:
+    result = err(ErrorCode.Disconnected)
   if self.fut.isNil:
     self.fut = self.queue.get()
   var res: T
   if timeout > 0:
     let received = await withTimeout(self.fut, timeout.int)
     if not received:
-      return
+      return err(ErrorCode.Timeouted)
     else:
       res = self.fut.read()
   else:
     res = await self.fut
   self.fut = nil
-  result = some(res)
+  result = ok(res)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc get*[T](self: Mailbox[T], timeout: int = 0): Future[Option[T]] {.async.} =
+proc get*[T](self: Mailbox[T], timeout: int = 0): Future[Result[T, ErrorCode]] {.async.} =
   result = await self.receive(timeout)
 
 # ------------------------------------------------------------------------------

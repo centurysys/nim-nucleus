@@ -1,6 +1,7 @@
 import std/asyncdispatch
 import std/options
 import std/strformat
+import results
 import ./ble_client
 import ./core/hci_status
 import ./core/opc
@@ -8,8 +9,10 @@ import ./sm/types
 import ./sm/requests
 import ./sm/parsers
 import ./util
+import ../lib/errcode
 import ../lib/syslog
-export types, parsers
+export results
+export types, parsers, errcode
 
 # ------------------------------------------------------------------------------
 # 1.3.1 LE ローカル IO Capabilities 設定要求
@@ -95,7 +98,8 @@ proc deleteRemoteDeviceKeyReq*(self: BleClient, device: PeerAddr):
 # ------------------------------------------------------------------------------
 # 1.3.35 LE ペアリング指示
 # ------------------------------------------------------------------------------
-proc pairingReq*(self: BleClient, gattId: uint16): Future[bool] {.async.} =
+proc pairingReq*(self: BleClient, gattId: uint16): Future[Result[bool, ErrorCode]]
+    {.async.} =
   const
     procName = "pairingReq"
     reqOpc = BTM_D_OPC_BLE_SM_PAIRING_INS
@@ -103,22 +107,22 @@ proc pairingReq*(self: BleClient, gattId: uint16): Future[bool] {.async.} =
   var buf: array[4, uint8]
   buf.setOpc(0, reqOpc)
   buf.setLe16(2, gattId)
-  let res_opt = await self.btmSendRecv(buf.toString)
-  if res_opt.isNone:
-    let errmsg = &"! {procName}: failed"
+  let response_res = await self.btmSendRecv(buf.toString)
+  if response_res.isErr:
+    let errmsg = &"! {procName}: failed, {response_res.error}"
     syslog.error(errmsg)
-    return
-  let response = res_opt.get()
+    return err(response_res.error)
+  let response = response_res.get()
   let resOpc = response.getOpc(0)
   if resOpc != expOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
-    return
+    return err(ErrorCode.OpcMismatch)
   let hciCode = response.getu8(2)
   let retGattId = response.getLe16(3)
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
   if hciCode.checkHciStatus(procName) and gattId == retGattId:
-    result = true
+    result = ok(true)
 
 
 when isMainmodule:
