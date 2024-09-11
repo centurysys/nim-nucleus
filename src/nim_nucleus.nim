@@ -1,4 +1,5 @@
 import std/asyncdispatch
+import std/enumutils
 import std/json
 import std/options
 import std/sequtils
@@ -8,7 +9,7 @@ import std/tables
 import std/times
 import nim_nucleus/submodule
 export SecurityMode, IoCap, PeerAddr
-export HandleValue
+export HandleValue, ErrorCode, Result
 
 type
   ScanState = object
@@ -25,7 +26,7 @@ type
   BleDevice* = ref BleDeviceObj
   DeviceWait = object
     waitDeviceQueue: Mailbox[BleDevice]
-    fut_device: Future[Option[BleDevice]]
+    fut_device: Future[Result[BleDevice, ErrorCode]]
     waiting: bool
   BleNimObj = object
     ble: BleClient
@@ -36,12 +37,14 @@ type
     eventQueue: AsyncQueue[string]
     devices: Table[PeerAddr, BleDevice]
     bondedKeys: Table[PeerAddr, RemoteCollectionKeys]
+    tblGatt: Table[PeerAddr, Gatt]
     waiter: DeviceWait
   BleNim* = ref BleNimObj
   GattObj = object
     ble: BleNim
     gatt: GattClient
     peer: PeerAddr
+    connected: bool
   Gatt* = ref GattObj
 
 # ==============================================================================
@@ -53,7 +56,10 @@ type
 # ------------------------------------------------------------------------------
 proc advertisingHandler(self: BleNim) {.async.} =
   while true:
-    let payload = await self.ble.waitAdvertising()
+    let payload_res = await self.ble.waitAdvertising()
+    if payload_res.isErr:
+      break
+    let payload = payload_res.get()
     let report_opt = payload.parseAdvertisingReport()
     if report_opt.isNone:
       continue
@@ -66,7 +72,7 @@ proc advertisingHandler(self: BleNim) {.async.} =
     device.seenTime = now().toTime
     self.devices[report.peer] = device
     if self.waiter.waiting and (not self.waiter.waitDeviceQueue.full):
-      await self.waiter.waitDeviceQueue.put(device)
+      discard await self.waiter.waitDeviceQueue.put(device)
 
 # ==============================================================================
 # Event
@@ -133,11 +139,37 @@ proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
     self.bondedKeys[peer] = device.keys
 
 # ------------------------------------------------------------------------------
+# GAP: LE Encryption Change 通知
+# ------------------------------------------------------------------------------
+proc handleEncryptionChange(self: BleNim, event: EncryptionChangeEvent) {.async.} =
+  let conHandle = event.conHandle
+  let enable = event.encryptionEnabled
+  discard await self.ble.handleEncryptionChange(conHandle, enable)
+
+# ------------------------------------------------------------------------------
+# GAP: LE Disconnection Complete 通知
+# ------------------------------------------------------------------------------
+proc handleDisconnectionComplete(self: BleNim, event: DisconnectionCompleteEvent)
+    {.async.} =
+  let conHandle = event.conHandle
+  let peer_opt = await self.ble.handleDisconnectionComplete(conHandle)
+  if peer_opt.isSome:
+    let peer = peer_opt.get()
+    let gatt = self.tblGatt.getOrDefault(peer)
+    if not gatt.isNil:
+      gatt.connected = false
+
+# ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
 # ------------------------------------------------------------------------------
 proc eventHandler(self: BleNim) {.async.} =
   while true:
-    let payload = await self.ble.waitEvent()
+    let payload_res = await self.ble.waitEvent()
+    if payload_res.isErr:
+      let err = payload_res.error
+      if err == ErrorCode.Disconnected:
+        break
+    let payload = payload_res.get()
     let notify_opt = payload.parseEvent()
     if notify_opt.isNone:
       continue
@@ -167,8 +199,17 @@ proc eventHandler(self: BleNim) {.async.} =
       # LE 認証完了通知
       let data = notify.authCompleteData
       self.setAuthCompleted(data)
+    of GapEncryptionChange:
+      # LE Encryption Change 通知
+      let data = notify.leEncryptionChangeData
+      await self.handleEncryptionChange(data)
+    of GapDisconnectionComplete:
+      # LE Disconnection Complete 通知
+      let data = notify.leDisconData
+      await self.handleDisconnectionComplete(data)
     else:
-      discard
+      let eventName = notify.event.symbolName
+      debugEcho(&"* eventHandler: unhandled event: {eventName}")
 
 # ------------------------------------------------------------------------------
 # API: async initialization
@@ -272,7 +313,7 @@ proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
 # API: Wait device
 # ------------------------------------------------------------------------------
 proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
-    Future[Option[BleDevice]] {.async.} =
+    Future[Result[BleDevice, ErrorCode]] {.async.} =
   proc calcWait(endTime: float): int =
     let nowTs = now().toTime.toUnixFloat
     result = ((endTime - nowTs) * 1000.0 + 0.5).int
@@ -282,7 +323,7 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
     for devWaiting in devicesUpperCase:
       let device_opt = self.findDeviceByAddr(devWaiting)
       if device_opt.isSome:
-        return device_opt
+        return ok(device_opt.get())
   if not self.waiter.fut_device.isNil:
     if self.waiter.fut_device.finished:
       discard self.waiter.fut_device.read()
@@ -293,7 +334,7 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
   self.waiter.waiting = true
   defer: self.waiter.waiting = false
   while true:
-    var dev_opt: Option[BleDevice]
+    var dev_res: Result[BleDevice, ErrorCode]
     if self.waiter.fut_device.isNil:
       self.waiter.fut_device = self.waiter.waitDeviceQueue.get()
     if timeout > 0:
@@ -301,16 +342,16 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
       if waitTime > 0:
         let received = await withTimeout(self.waiter.fut_device, waitTime)
         if not received:
-          return
-        dev_opt = self.waiter.fut_device.read()
+          return err(ErrorCode.Timeouted)
+        dev_res = self.waiter.fut_device.read()
       else:
-        return
+        return err(ErrorCode.ValueError)
     else:
-      dev_opt = await self.waiter.fut_device
+      dev_res = await self.waiter.fut_device
     self.waiter.fut_device = nil
-    let devNew = dev_opt.get()
+    let devNew = dev_res.get()
     if devices.len == 0 or devNew.peerAddrStr in devicesUpperCase:
-      return dev_opt
+      return ok(dev_res.get)
 
 # ==============================================================================
 # Security
@@ -399,22 +440,24 @@ type
 #
 # ------------------------------------------------------------------------------
 proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
-    Future[Option[Gatt]] {.async.} =
-  let client_opt = await self.ble.gattConnect(connParams, timeout = timeout)
-  if client_opt.isNone:
+    Future[Result[Gatt, ErrorCode]] {.async.} =
+  let client_res = await self.ble.gattConnect(connParams, timeout = timeout)
+  if client_res.isErr:
     discard await self.ble.gattCommonConnectCancelIns()
     return
   let res = new Gatt
-  res.gatt = client_opt.get()
+  res.gatt = client_res.get()
   res.peer = connParams.peer
+  res.connected = true
   res.ble = self
-  result = some(res)
+  self.tblGatt[res.peer] = res
+  result = ok(res)
 
 # ------------------------------------------------------------------------------
 # API: Connection
 # ------------------------------------------------------------------------------
 proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
-    Future[Option[Gatt]] {.async.} =
+    Future[Result[Gatt, ErrorCode]] {.async.} =
   let address = device.peer.address
   let random = (device.peer.addrType == AddrType.Random)
   let connParams = gattDefaultGattConnParams(address, random)
@@ -424,10 +467,10 @@ proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
 # API: Connection
 # ------------------------------------------------------------------------------
 proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1000):
-    Future[Option[Gatt]] {.async.} =
+    Future[Result[Gatt, ErrorCode]] {.async.} =
   let address_opt = deviceAddr.string2bdAddr()
   if address_opt.isNone:
-    return
+    return err(ErrorCode.ValueError)
   let address = address_opt.get()
   let connParams = gattDefaultGattConnParams(address, random)
   result = await self.connect(connParams, timeout)
@@ -442,121 +485,176 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
   self.gatt = nil
 
 # ------------------------------------------------------------------------------
+# API: Wait Encryption Complete
+# ------------------------------------------------------------------------------
+proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
+  result = await self.gatt.waitEncryptionComplete()
+
+# ------------------------------------------------------------------------------
 # API: Read Characteristics
 # ------------------------------------------------------------------------------
-proc readGattChar*(self: Gatt, handle: uint16): Future[Option[seq[uint8]]] {.async.} =
+proc readGattChar*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
+    {.async.} =
   result = await self.gatt.gattReadCharacteristicValue(handle)
 
-proc readGattChar*(self: Gatt, uuid: string): Future[Option[seq[HandleValue]]] {.async.} =
-  result = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
+proc readGattChar*(self: Gatt, uuid: string): Future[Result[HandleValue, ErrorCode]]
+    {.async.} =
+  let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
       0xffff'u16, uuid)
+  if handleValues_res.isOk:
+    let handleValues = handleValues_res.get()
+    result = ok(handleValues[0])
+  else:
+    result = err(handleValues_res.error)
 
-proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Option[seq[HandleValue]]] {.async.} =
-  result = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
+proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, ErrorCode]]
+    {.async.} =
+  let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
       0xffff'u16, $uuid)
+  if handleValues_res.isOk:
+    let handleValues = handleValues_res.get()
+    result = ok(handleValues[0])
+  else:
+    result = err(handleValues_res.error)
 
 # ------------------------------------------------------------------------------
 # API: Write Characteristics
 # ------------------------------------------------------------------------------
 proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string):
-    Future[bool] {.async.} =
+    Future[Result[bool, ErrorCode]] {.async.} =
   result = await self.gatt.gattWriteCharacteristicValue(handle, value)
 
-proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8): Future[bool] {.async.} =
+proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8):
+    Future[Result[bool, ErrorCode]] {.async.} =
   result = await self.gatt.gattWriteCharacteristicValue(handle, value)
 
 # ------------------------------------------------------------------------------
 # API: Read Descriptors
 # ------------------------------------------------------------------------------
-proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Option[seq[uint8]]] {.async.} =
+proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
+    {.async.} =
   result = await self.gatt.gattReadCharacteristicDescriptors(handle)
 
 # ------------------------------------------------------------------------------
 # API: Write Descriptors
 # ------------------------------------------------------------------------------
-proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16): Future[bool] {.async.} =
+proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16):
+    Future[Result[bool, ErrorCode]] {.async.} =
   result = await self.gatt.gattWriteCharacteristicDescriptors(handle, desc)
 
 # ------------------------------------------------------------------------------
 # API: Wait Notification
 # ------------------------------------------------------------------------------
-proc waitNotification*(self: Gatt, timeout = 0): Future[Option[GattHandleValue]] {.async.} =
+proc waitNotification*(self: Gatt, timeout = 0): Future[Result[GattHandleValue, ErrorCode]]
+    {.async.} =
   result = await self.gatt.waitNotify(timeout)
 
 
 when isMainModule:
-  import std/enumutils
   import std/os
   const KeysFile = "/tmp/ble_keys.json"
 
   proc notificationHandler(self: Gatt) {.async.} =
-    while true:
-      let val_opt = await self.waitNotification()
-      if val_opt.isNone:
-        break
-      let val = val_opt.get()
+    while self.connected:
+      let val_res = await self.waitNotification(1000)
+      if val_res.isErr:
+        if val_res.error == ErrorCode.Disconnected:
+          echo "** notificationHandler: Disconnected."
+          break
+        else:
+          continue
+      let val = val_res.get()
       let values = val.values.mapIt(&"{it.uint8:02x}").join(", ")
       echo &"** Notify: handle: 0x{val.handle:04x}, values: [{values}]"
 
-  proc readBufferSize(self: Gatt): Future[Option[bool]] {.async.} =
+  proc readBufferSize(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
     const handle = 0x002e'u16
     let cmd = @[0x02'u8, 0x00'u8, 0xd6'u8]
-    let res = await self.writeGattChar(handle, cmd)
+    let res_res = await self.writeGattChar(handle, cmd)
+    if res_res.isErr:
+      if res_res.error == ErrorCode.Disconnected:
+        echo "** readBufferSize: Disconnected."
+      return err(res_res.error)
+    let res = res_res.get()
     if not res:
       echo "??? write custom characteristic failed."
       return
-    let buf_opt = await self.readGattChar(handle)
-    if buf_opt.isSome:
-      let buf = buf_opt.get()
-      echo buf.mapIt(&"{it:02x}")
-      result = some(buf[3] == 0x01'u8)
+    let buf_res = await self.readGattChar(handle)
+    if buf_res.isOk:
+      let buf = buf_res.get()
+      result = ok(buf[3] == 0x01'u8)
 
-  proc setBufferEnable(self: Gatt, enable: bool): Future[bool] {.async.} =
+  proc setBufferEnable(self: Gatt, enable: bool): Future[Result[bool, ErrorCode]]
+      {.async.} =
     const handle = 0x002e'u16
     let param = if enable: 0x01'u8 else: 0x00'u8
     let cmd = @[0x03'u8, 0x01'u8, 0xa6'u8, param]
     result = await self.writeGattChar(handle, cmd)
-    if not result:
+    if result.isErr:
+      if result.error == ErrorCode.Disconnected:
+        echo "** setBufferEnable: Disconnected."
+      return err(result.error)
+    if not result.get:
       echo "??? write custom characteristic failed."
 
-  proc setDateTime(self: Gatt): Future[bool] {.async.} =
+  proc setDateTime(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
     const handle = 0x002e'u16
     let now = now()
     let year = (now.year - 2000).uint8
     let cmd = @[0x08'u8, 0x01'u8, 0x01'u8,
         year, now.month.uint8, now.monthday.uint8,
         now.hour.uint8, now.minute.uint8, now.second.uint8]
-    echo cmd
     result = await self.writeGattChar(handle, cmd)
-    echo &" setDateTime -> result: {result}"
+    if result.isErr:
+      if result.error == ErrorCode.Disconnected:
+        echo "** setDateTime: Disconnected."
+      return err(result.error)
+    echo &" setDateTime -> result: {result.get}"
 
   proc handleGatt(self: Gatt) {.async.} =
     asyncCheck self.notificationHandler()
-    const items = [CharaUuid.DeviceName, CharaUuid.HardwareRevision,
-        CharaUuid.FirmwareRevision, CharaUuid.SoftwareRevision]
+    echo "*** Wait for Encryption complete..."
+    let enc_res = await self.waitEncryptionComplete()
+    if enc_res.isOk:
+      echo " --> Encryption completed."
+    else:
+      echo "!!! Disconnected ??"
+      return
+    const items = [CharaUuid.DeviceName, CharaUuid.ModelNumber,
+        CharaUuid.HardwareRevision, CharaUuid.FirmwareRevision,
+        CharaUuid.SoftwareRevision, CharaUuid.ManufactureName]
     for item in items:
-      let handleValue_opt = await self.readGattChar(item)
-      if handleValue_opt.isSome:
-        let handleValue = handleValue_opt.get()[0]
-        echo &"* {item.symbolName} --> {handleValue.handle}, {handleValue.value.toString}"
+      let handleValue_res = await self.readGattChar(item)
+      if handleValue_res.isErr:
+        let err = handleValue_res.error
+        if err == ErrorCode.Disconnected:
+          echo "!! handleGatt: device disconnected."
+          await self.disconnect(unpair = false)
+          return
+      else:
+        let handleValue = handleValue_res.get()
+        echo &"* {item.symbolName} --> 0x{handleValue.handle:04x}:" &
+            &" {handleValue.value.toString}"
     await sleepAsync(1000)
-    let bufEnabled_opt = await self.readBufferSize()
-    if bufEnabled_opt.isSome:
-      let bufEnabled = bufEnabled_opt.get()
+    let bufEnabled_res = await self.readBufferSize()
+    if bufEnabled_res.isErr:
+      let err = bufEnabled_res.error
+      if err == ErrorCode.Disconnected:
+        echo "!! handleGatt: device disconnected."
+        await self.disconnect(unpair = false)
+        return
+    else:
+      let bufEnabled = bufEnabled_res.get()
       echo &"buffer enable: {bufEnabled}"
       if not bufEnabled:
         discard await self.setBufferEnable(true)
       discard await self.setDateTime()
     echo "wait..."
     await sleepAsync(2 * 1000)
-    let model_opt = await self.readGattChar("2a24")
-    if model_opt.isSome:
-      let model = model_opt.get()[0]
-      echo &"* handle: 0x{model.handle:04x}"
-      echo &"* value: {model.value.toString}"
     let res = await self.writeGattDescriptor(0x0013'u16, 0x0002'u16)
     echo &"write CCC(Desc) -> {res}"
-    await sleepAsync(5 * 1000)
+    while self.connected:
+      await sleepAsync(1000)
     await self.disconnect(unpair = false)
 
   proc handleDevice(self: BleNim, dev: BleDevice) {.async.} =
@@ -568,7 +666,7 @@ when isMainModule:
     for retry in 0 ..< 3:
       echo &"* [{retry + 1}] Try to connect..."
       let gatt_opt = await self.connect(dev)
-      if gatt_opt.isSome:
+      if gatt_opt.isOk:
         echo "---> connected"
         let gatt = gatt_opt.get()
         await gatt.handleGatt()
@@ -586,7 +684,7 @@ when isMainModule:
     echo "done."
 
   proc asyncMain() {.async.} =
-    let ble = newBleNim(debug = true, debug_stack = true,
+    let ble = newBleNim(debug = true, debug_stack = false,
         mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return
@@ -608,7 +706,7 @@ when isMainModule:
       echo &"[{retry + 1}] waiting..."
       let dev_opt = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
         timeout = 1000)
-      if dev_opt.isNone:
+      if dev_opt.isErr:
         continue
       dev = dev_opt.get()
       discard await ble.startStopScan(active = true, enable = false)

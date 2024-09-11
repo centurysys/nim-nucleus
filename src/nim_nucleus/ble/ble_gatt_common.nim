@@ -10,27 +10,29 @@ import ./core/hci_status
 import ./gatt/requests
 import ./gatt/types
 import ./util
+import ../lib/errcode
 import ../lib/syslog
-export types, requests
+import results
+export errcode, types, requests, results
 
 # ------------------------------------------------------------------------------
 # Send Instruction/Receive Confirmation
 # ------------------------------------------------------------------------------
 proc btmInstruction(self: BleClient, procName: string, payload: string,
-    expectedOpc: uint16): Future[Option[int16]] {.async.} =
-  let res_opt = await self.btmSendRecv(payload)
-  if res_opt.isNone:
+    expectedOpc: uint16): Future[Result[int16, ErrorCode]] {.async.} =
+  let response_res = await self.btmSendRecv(payload)
+  if response_res.isErr:
     let errmsg = &"! {procName}: failed"
     syslog.error(errmsg)
-    return
-  let response = res_opt.get()
+    return err(response_res.error)
+  let response = response_res.get()
   let resOpc = response.getOpc(0)
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
-    return
+    return err(ErrorCode.OpcMismatch)
   let res = response.getLeInt16(2)
-  result = some(res)
+  result = ok(res)
 
 # ==============================================================================
 # Instructions
@@ -40,7 +42,7 @@ proc btmInstruction(self: BleClient, procName: string, payload: string,
 # 1.4.1 GATT 接続指示 (BT4.2)
 # ------------------------------------------------------------------------------
 proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
-    Future[Option[int16]] {.async.} =
+    Future[Result[int16, ErrorCode]] {.async.} =
   const
     procName = "gattCommonConnectIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_INS
@@ -67,7 +69,7 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
 # 1.4.5 GATT 切断指示
 # ------------------------------------------------------------------------------
 proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16):
-    Future[Option[int16]] {.async.} =
+    Future[Result[int16, ErrorCode]] {.async.} =
   const
     procName = "gattCommonDisconnectIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_DISCONNECT_INS
@@ -80,27 +82,28 @@ proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16):
 # ------------------------------------------------------------------------------
 # 1.4.8 GATT 接続中断指示
 # ------------------------------------------------------------------------------
-proc gattCommonConnectCancelIns*(self: BleClient): Future[bool] {.async.} =
+proc gattCommonConnectCancelIns*(self: BleClient): Future[Result[bool, ErrorCode]]
+    {.async.} =
   const
     procName = "gattCommonConnectCancelIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_CANCEL_INS
     expectedOpc = BTM_D_OPC_BLE_GATT_CMN_CONNECT_CANCEL_CFM
   var buf: array[2, uint8]
   buf.setOpc(0, indOpc)
-  let res_opt = await self.btmSendRecv(buf.toString)
-  if res_opt.isNone:
-    let errmsg = &"! {procName}: failed"
+  let response_res = await self.btmSendRecv(buf.toString)
+  if response_res.isErr:
+    let errmsg = &"! {procName}: failed, {response_res.error}"
     syslog.error(errmsg)
-    return
-  let response = res_opt.get()
+    return err(response_res.error)
+  let response = response_res.get()
   let resOpc = response.getOpc(0)
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
-    return
+    return err(ErrorCode.OpcMismatch)
   let hciCode = response.getu8(2)
   self.debugEcho(&"* {procName}: hciCode: {hciCode}")
-  result = hciCode.checkHciStatus(procName)
+  result = ok(hciCode.checkHciStatus(procName))
 
 # ==============================================================================
 # Instruction/Confirm -> Wait Event
@@ -110,17 +113,17 @@ proc gattCommonConnectCancelIns*(self: BleClient): Future[bool] {.async.} =
 # GATT 接続
 # ------------------------------------------------------------------------------
 proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
-    Future[Option[GattClient]] {.async.} =
+    Future[Result[GattClient, ErrorCode]] {.async.} =
   const procName = "gattConnect"
-  let gattRes_opt = await self.gattCommonConnectIns(params)
-  if gattRes_opt.isNone:
-    syslog.error(&"! {procName}: GATT connection failed.")
-    return
-  let gattRes = gattRes_opt.get()
+  let gattRes_res = await self.gattCommonConnectIns(params)
+  if gattRes_res.isErr:
+    syslog.error(&"! {procName}: GATT connection failed, {gattRes_res.error}")
+    return err(gattRes_res.error)
+  let gattRes = gattRes_res.get()
   if gattRes != 0:
     let errmsg = gattResultToString(gattRes, detail = true)
     syslog.error(&"! {procName}: GATT connection failed, {errmsg}.")
-    return
+    return err(ErrorCode.GattError)
   var
     gattId: Option[uint16]
     conHandle: Option[uint16]
@@ -129,13 +132,16 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
     BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT,
   ]
   while true:
-    let payload_opt = await self.waitAppEvent(waitingEvents, timeout)
-    if payload_opt.isNone:
-      # timeouted
-      syslog.error(&"! {procName}: GATT connection timeouted.")
-      discard await self.gattCommonConnectCancelIns()
-      break
-    let msg_opt = payload_opt.get.parseEvent()
+    let payload_res = await self.waitAppEvent(waitingEvents, timeout)
+    if payload_res.isErr:
+      let err = payload_res.error
+      if err == ErrorCode.Timeouted:
+        # timeouted
+        syslog.error(&"! {procName}: GATT connection timeouted.")
+        discard await self.gattCommonConnectCancelIns()
+        result = err(ErrorCode.Timeouted)
+        break
+    let msg_opt = payload_res.get.parseEvent()
     if msg_opt.isNone:
       continue
     let msg = msg_opt.get()
@@ -150,6 +156,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
         gattId = some(msg.gattConData.common.gattId)
       else:
         logGattResult(procName, gattResult, detail = true)
+        result = err(ErrorCode.GattError)
         break
     else:
       discard
@@ -159,7 +166,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
       if client_opt.isSome:
         let client = client_opt.get()
         client.peer = params.peer
-        result = some(client)
+        result = ok(client)
       break
   discard await self.waitAppEvent(@[])
 
@@ -168,7 +175,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
 # ------------------------------------------------------------------------------
 proc disconnect*(self: GattClient): Future[bool] {.async.} =
   let gattId = self.gattId
-  let res_opt = await self.bleClient.gattCommonDisconnectIns(gattId)
-  if res_opt.isNone:
+  let response_res = await self.bleClient.gattCommonDisconnectIns(gattId)
+  if response_res.isErr:
     return
   result = self.bleClient.deregister(self)
