@@ -7,9 +7,11 @@ import std/strformat
 import std/strutils
 import std/tables
 import std/times
+import results
 import nim_nucleus/submodule
+export results
 export SecurityMode, IoCap, PeerAddr
-export HandleValue, ErrorCode, Result
+export HandleValue, ErrorCode
 
 type
   ScanState = object

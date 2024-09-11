@@ -1,6 +1,7 @@
 import std/asyncdispatch
 import std/options
 import std/strformat
+import results
 import ./ble_client
 import ./core/hci_status
 import ./core/opc
@@ -10,8 +11,8 @@ import ./sm/parsers
 import ./util
 import ../lib/errcode
 import ../lib/syslog
-import results
-export types, parsers, ErrorCode, Result
+export results
+export types, parsers, errcode
 
 # ------------------------------------------------------------------------------
 # 1.3.1 LE ローカル IO Capabilities 設定要求

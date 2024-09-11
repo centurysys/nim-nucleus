@@ -1,6 +1,7 @@
 import std/asyncdispatch
 import std/options
 import std/strformat
+import results
 import ./core/gatt_result
 import ./core/opc
 import ./gatt/parsers
@@ -9,8 +10,8 @@ import ./ble_client
 import ./util
 import ../lib/errcode
 import ../lib/syslog
-import results
-export types, gatt_result, parsers, Result, ErrorCode
+export results
+export types, gatt_result, parsers, errcode
 
 # ------------------------------------------------------------------------------
 #

@@ -5,6 +5,7 @@ import std/strformat
 import std/strutils
 import std/tables
 import std/times
+import results
 import ../lib/asyncsync
 import ../lib/errcode
 import ../lib/mailbox
@@ -17,8 +18,8 @@ import ./gatt/parsers
 import ./gatt/types
 import ./notifications
 import ./util
-export opc
-export mailbox
+export results
+export opc, mailbox
 export GattEventCommon, GattHandleValue, ErrorCode
 
 type

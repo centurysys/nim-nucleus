@@ -2,6 +2,7 @@ import std/asyncdispatch
 import std/options
 import std/strformat
 import std/tables
+import results
 import ./ble_client
 import ./notifications
 import ./core/opc
@@ -12,8 +13,8 @@ import ./gatt/types
 import ./util
 import ../lib/errcode
 import ../lib/syslog
-import results
-export errcode, types, requests, results
+export results
+export errcode, types, requests
 
 # ------------------------------------------------------------------------------
 # Send Instruction/Receive Confirmation

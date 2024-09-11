@@ -1,9 +1,10 @@
 import std/asyncdispatch
 import std/options
+import results
 import ./asyncsync
 import ./errcode
-import results
-export results, errcode
+export results
+export errcode
 
 type
   MailboxObj[T] = object
@@ -50,7 +51,6 @@ proc empty*[T](self: Mailbox[T]): bool {.inline.} =
 # ------------------------------------------------------------------------------
 proc send*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.async.} =
   if self.closed:
-    debugEcho("!!! send: mailbox is closed.")
     if not self.fut.isNil:
       let err = new IOError
       self.fut.fail(err)
@@ -63,7 +63,6 @@ proc send*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.asyn
 # ------------------------------------------------------------------------------
 proc put*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.async.} =
   if self.closed:
-    debugEcho("!!! put: mailbox is closed.")
     if not self.fut.isNil:
       let err = new IOError
       self.fut.fail(err)
@@ -76,7 +75,6 @@ proc put*[T](self: Mailbox[T], data: T): Future[Result[bool, ErrorCode]] {.async
 # ------------------------------------------------------------------------------
 proc sendNoWait*[T](self: Mailbox[T], data: T): Result[bool, ErrorCode] =
   if self.closed:
-    debugEcho("!!! sendNoWait: mailbox is closed.")
     if not self.fut.isNil:
       let err = new IOError
       self.fut.fail(err)
