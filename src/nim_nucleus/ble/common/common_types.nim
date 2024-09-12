@@ -113,4 +113,4 @@ proc bdAddr2string*(x: uint64): string =
 proc `$`*(x: PeerAddr): string =
   let addrType = if x.addrType == AddrType.Random: "Random" else: "Public"
   let address = x.address.bdAddr2string()
-  result = &"{address}({addrType})"
+  result = &"{address} ({addrType})"

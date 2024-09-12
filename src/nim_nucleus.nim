@@ -50,6 +50,25 @@ type
   Gatt* = ref GattObj
 
 # ==============================================================================
+# Utility
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc `$`*(x: BleDevice): string =
+  var buf = newSeqOfCap[string](16)
+  buf.add("--- BleDevice Informations ---")
+  buf.add(&"* Peer: {x.peer}")
+  if x.name.isSome:
+    buf.add(&"* Name: {x.name.get}")
+  buf.add(&"* RSSI: {x.rssi} [dBm]")
+  if x.keys.valid:
+    buf.add("  -- Remote Collection Keys --")
+    buf.add($(x.keys))
+  result = buf.join("\n")
+
+# ==============================================================================
 # Advertising
 # ==============================================================================
 
@@ -168,9 +187,7 @@ proc eventHandler(self: BleNim) {.async.} =
   while true:
     let payload_res = await self.ble.waitEvent()
     if payload_res.isErr:
-      let err = payload_res.error
-      if err == ErrorCode.Disconnected:
-        break
+      continue
     let payload = payload_res.get()
     let notify_opt = payload.parseEvent()
     if notify_opt.isNone:
@@ -211,7 +228,8 @@ proc eventHandler(self: BleNim) {.async.} =
       await self.handleDisconnectionComplete(data)
     else:
       let eventName = notify.event.symbolName
-      debugEcho(&"* eventHandler: unhandled event: {eventName}")
+      let logmsg = &"* eventHandler: unhandled event: {eventName}"
+      syslog.info(logmsg)
 
 # ------------------------------------------------------------------------------
 # API: async initialization
@@ -446,7 +464,7 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   let client_res = await self.ble.gattConnect(connParams, timeout = timeout)
   if client_res.isErr:
     discard await self.ble.gattCommonConnectCancelIns()
-    return
+    return err(client_res.error)
   let res = new Gatt
   res.gatt = client_res.get()
   res.peer = connParams.peer
@@ -484,6 +502,9 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
   discard await self.gatt.disconnect()
   if unpair:
     discard await self.ble.removeRemoteCollectionKeys(self.peer)
+  let peer = self.peer
+  if self.ble.tblGatt.hasKey(peer):
+    self.ble.tblGatt.del(peer)
   self.gatt = nil
 
 # ------------------------------------------------------------------------------
@@ -493,12 +514,15 @@ proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.asyn
   result = await self.gatt.waitEncryptionComplete()
 
 # ------------------------------------------------------------------------------
-# API: Read Characteristics
+# API: Read Characteristics (handle)
 # ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
     {.async.} =
   result = await self.gatt.gattReadCharacteristicValue(handle)
 
+# ------------------------------------------------------------------------------
+# API: Read Characteristics (UUID string)
+# ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, uuid: string): Future[Result[HandleValue, ErrorCode]]
     {.async.} =
   let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
@@ -509,6 +533,9 @@ proc readGattChar*(self: Gatt, uuid: string): Future[Result[HandleValue, ErrorCo
   else:
     result = err(handleValues_res.error)
 
+# ------------------------------------------------------------------------------
+# API: Read Characteristics (UUID enum)
+# ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, ErrorCode]]
     {.async.} =
   let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
@@ -667,10 +694,10 @@ when isMainModule:
     echo &"* RSSI: {dev.rssi} [dBm]"
     for retry in 0 ..< 3:
       echo &"* [{retry + 1}] Try to connect..."
-      let gatt_opt = await self.connect(dev)
-      if gatt_opt.isOk:
+      let gatt_res = await self.connect(dev)
+      if gatt_res.isOk:
         echo "---> connected"
-        let gatt = gatt_opt.get()
+        let gatt = gatt_res.get()
         await gatt.handleGatt()
         break
       else:
@@ -679,7 +706,8 @@ when isMainModule:
       echo dev.keys
     let allKeys = self.getAllRemoteCollectionKeys()
     if allKeys.len > 0:
-      echo allKeys
+      for allKey in allKeys:
+        echo allKey
       KeysFile.writeFile($(%allKeys))
     elif KeysFile.fileExists:
       KeysFile.removeFile()
@@ -706,17 +734,19 @@ when isMainModule:
       scanStopped = false
     for retry in 0 ..< 30:
       echo &"[{retry + 1}] waiting..."
-      let dev_opt = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
+      let dev_res = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
         timeout = 1000)
-      if dev_opt.isErr:
+      if dev_res.isErr:
         continue
-      dev = dev_opt.get()
+      dev = dev_res.get()
       discard await ble.startStopScan(active = true, enable = false)
       scanStopped = true
       await ble.handleDevice(dev)
       break
     let devices = ble.allDevices()
     echo &"* scanned devices num: {devices.len}"
+    for device in devices:
+      echo device
     if not scanStopped:
       discard await ble.startStopScan(active = true, enable = false)
 
