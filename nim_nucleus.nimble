@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "Takeyoshi Kikuchi"
-description   = "A new awesome nimble package"
+description   = "Nim binding for NetNucleus BLE stack"
 license       = "MIT"
 srcDir        = "src"
 binDir        = "bin"
