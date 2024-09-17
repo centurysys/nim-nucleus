@@ -9,9 +9,10 @@ import std/tables
 import std/times
 import results
 import nim_nucleus/submodule
-export results
+export results, asyncsync
 export SecurityMode, IoCap, PeerAddr
 export HandleValue, ErrorCode
+export util
 
 type
   ScanState = object
@@ -574,9 +575,15 @@ proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16):
 # ------------------------------------------------------------------------------
 # API: Wait Notification
 # ------------------------------------------------------------------------------
-proc waitNotification*(self: Gatt, timeout = 0): Future[Result[GattHandleValue, ErrorCode]]
+proc waitNotification*(self: Gatt, timeout = 0): Future[Result[HandleValue, ErrorCode]]
     {.async.} =
-  result = await self.gatt.waitNotify(timeout)
+  let res = await self.gatt.waitNotify(timeout)
+  if res.isErr:
+    return res.error.err
+  var handleValue: HandleValue
+  handleValue.handle = res.get.handle
+  handleValue.value = res.get.values.items.toSeq.mapIt(it.uint8)
+  result = handleValue.ok
 
 
 when isMainModule:
@@ -593,7 +600,7 @@ when isMainModule:
         else:
           continue
       let val = val_res.get()
-      let values = val.values.mapIt(&"{it.uint8:02x}").join(", ")
+      let values = val.value.mapIt(&"{it:02x}").join(", ")
       echo &"** Notify: handle: 0x{val.handle:04x}, values: [{values}]"
 
   proc readBufferSize(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
