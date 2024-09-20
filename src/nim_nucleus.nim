@@ -19,7 +19,7 @@ type
     active: bool
     enable: bool
     filter: bool
-  BleDeviceObj = object
+  BleDeviceObj* = object
     peer*: PeerAddr
     peerAddrStr*: string
     name*: Option[string]
@@ -236,6 +236,7 @@ proc eventHandler(self: BleNim) {.async.} =
 # API: async initialization
 # ------------------------------------------------------------------------------
 proc init*(self: BleNim): Future[bool] {.async.} =
+  ## BleNim 内部で使用している NetNucleus の初期化を行う。
   if self.running:
     return true
   result = await self.ble.initBTM()
@@ -255,6 +256,7 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 proc newBleNim*(debug = false, debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
     iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
+  ## BleNim インスタンスの初期化
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
   res.mode = mode
@@ -275,6 +277,7 @@ proc newBleNim*(debug = false, debug_stack = false, mode: SecurityMode = Securit
 # ------------------------------------------------------------------------------
 proc startStopScan*(self: BleNim, active: bool, enable: bool, filterDuplicates = true):
     Future[bool] {.async.} =
+  ## Scan の有効・無効を設定する。
   const procName = "startStopScan"
   if enable == self.scan.enable:
     if active != self.scan.active:
@@ -304,6 +307,7 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, filterDuplicates =
 # API: Get All devices
 # ------------------------------------------------------------------------------
 proc allDevices*(self: BleNim): seq[BleDevice] =
+  ## アドバタイジング情報を受信したペリフェラル情報の一覧を取得する
   let nums = self.devices.len
   result = newSeqOfCap[BleDevice](nums)
   for device in self.devices.values:
@@ -313,6 +317,7 @@ proc allDevices*(self: BleNim): seq[BleDevice] =
 # API: Find device by Name
 # ------------------------------------------------------------------------------
 proc findDeviceByName*(self: BleNim, name: string): Option[BleDevice] =
+  ## アドバタイジング情報を受信したペリフェラルを名前で検索する
   for device in self.devices.values:
     if device.name.isSome and device.name.get == name:
       return some(device)
@@ -321,6 +326,9 @@ proc findDeviceByName*(self: BleNim, name: string): Option[BleDevice] =
 # API: Find device by BD Address
 # ------------------------------------------------------------------------------
 proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
+  ## アドバタイジング情報を受信したペリフェラルを Bluetooth アドレスで検索する。
+  ##
+  ## アドレスの形式は "aa:bb:cc:dd:ee:ff" とする。
   let address_opt = peer.string2bdAddr()
   if address_opt.isNone:
     return
@@ -335,6 +343,7 @@ proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
 # ------------------------------------------------------------------------------
 proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
     Future[Result[BleDevice, ErrorCode]] {.async.} =
+  ## 指定したデバイスのアドバタイジングを受信するまで待機する。
   proc calcWait(endTime: float): int =
     let nowTs = now().toTime.toUnixFloat
     result = ((endTime - nowTs) * 1000.0 + 0.5).int
@@ -383,12 +392,14 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
 # ------------------------------------------------------------------------------
 proc setRemoteCollectionKeys*(self: BleNim, keys: RemoteCollectionKeys):
     Future[bool] {.async.} =
+  ## Central として動作する際の Peripheral の各種暗号化鍵を登録する。
   result = await self.ble.setRemoteCollectionKeyReq(keys)
   if result:
     let peer = keys.peer
     self.bondedKeys[peer] = keys
 
 proc setRemoteCollectionKeys*(self: BleNim, keysJson: JsonNode): Future[bool] {.async.} =
+  ## 上の関数と機能は同じだが、RemoteCollectionKeys を JSON 化した JsonNode 形式を引数にする。
   try:
     let keys = keysJson.to(RemoteCollectionKeys)
     result = await self.setRemoteCollectionKeys(keys)
@@ -400,6 +411,7 @@ proc setRemoteCollectionKeys*(self: BleNim, keysJson: JsonNode): Future[bool] {.
 # ------------------------------------------------------------------------------
 proc setAllRemoteCollectionKeys*(self: BleNim, allKeys: seq[RemoteCollectionKeys]):
     Future[int] {.async.} =
+  ## Central として動作する際の 全 Peripheral の各種暗号化鍵を一括登録する。
   for keys in allKeys.items:
     if keys.valid:
       let res = await self.setRemoteCollectionKeys(keys)
@@ -407,6 +419,7 @@ proc setAllRemoteCollectionKeys*(self: BleNim, allKeys: seq[RemoteCollectionKeys
         result.inc
 
 proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[int] {.async.} =
+  ## 上の関数と機能は同じだが、seq\[RemoteCollectionKeys\] を JSON 化した JsonNode 形式を引数にする。
   try:
     let allKeys = allKeysJson.to(seq[RemoteCollectionKeys])
     result = await self.setAllRemoteCollectionKeys(allKeys)
@@ -417,6 +430,9 @@ proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[in
 # API: Get Remote Collection Keys (保存用)
 # ------------------------------------------------------------------------------
 proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
+  ## ペアリング済みデバイスの情報を一括で取得する。
+  ##
+  ## 次回起動時にペアリング情報を復旧させるためにはこれを保存しておく必要がある。
   result = newSeqOfCap[RemoteCollectionKeys](5)
   for keys in self.bondedKeys.values:
     if keys.valid:
@@ -426,6 +442,7 @@ proc getAllRemoteCollectionKeys*(self: BleNim): seq[RemoteCollectionKeys] =
 # API: Remove Remote Collection Keys
 # ------------------------------------------------------------------------------
 proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.async.} =
+  ## ペアリング済みデバイスの情報を削除する。
   let keys = self.bondedKeys.getOrDefault(peer)
   if not keys.valid:
     return
@@ -479,6 +496,7 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
 # ------------------------------------------------------------------------------
 proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
     Future[Result[Gatt, ErrorCode]] {.async.} =
+  ## ペリフェラルに GATT 接続を行う。
   let address = device.peer.address
   let random = (device.peer.addrType == AddrType.Random)
   let connParams = gattDefaultGattConnParams(address, random)
@@ -489,6 +507,7 @@ proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
 # ------------------------------------------------------------------------------
 proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1000):
     Future[Result[Gatt, ErrorCode]] {.async.} =
+  ## ペリフェラルに GATT 接続を行う。
   let address_opt = deviceAddr.string2bdAddr()
   if address_opt.isNone:
     return err(ErrorCode.ValueError)
@@ -500,6 +519,7 @@ proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1
 # API: Disconnect
 # ------------------------------------------------------------------------------
 proc disconnect*(self: Gatt, unpair = false) {.async.} =
+  ## 接続されている GATT 接続の切断を行う。
   discard await self.gatt.disconnect()
   if unpair:
     discard await self.ble.removeRemoteCollectionKeys(self.peer)
@@ -512,6 +532,8 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
 # API: Wait Encryption Complete
 # ------------------------------------------------------------------------------
 proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
+  ## GATT 接続後即ペアリング要求を送ってくるペリフェラルとの間での
+  ## ペアリング処理が完了するまで待機する。
   result = await self.gatt.waitEncryptionComplete()
 
 # ------------------------------------------------------------------------------
@@ -519,6 +541,7 @@ proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.asyn
 # ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
     {.async.} =
+  ## キャラクタリスティック値を読み取る (ハンドル指定)
   result = await self.gatt.gattReadCharacteristicValue(handle)
 
 # ------------------------------------------------------------------------------
@@ -526,6 +549,7 @@ proc readGattChar*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorC
 # ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, uuid: string): Future[Result[HandleValue, ErrorCode]]
     {.async.} =
+  ## キャラクタリスティック値を読み取る (UUID 指定)
   let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
       0xffff'u16, uuid)
   if handleValues_res.isOk:
@@ -552,6 +576,7 @@ proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, Erro
 # ------------------------------------------------------------------------------
 proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string):
     Future[Result[bool, ErrorCode]] {.async.} =
+  ## キャラクタリスティック値を書き込む (ハンドル指定)
   result = await self.gatt.gattWriteCharacteristicValue(handle, value)
 
 proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8):
@@ -563,6 +588,7 @@ proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8):
 # ------------------------------------------------------------------------------
 proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
     {.async.} =
+  ## ディスクリプタ値を読み取る (ハンドル指定)
   result = await self.gatt.gattReadCharacteristicDescriptors(handle)
 
 # ------------------------------------------------------------------------------
@@ -577,6 +603,7 @@ proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16):
 # ------------------------------------------------------------------------------
 proc waitNotification*(self: Gatt, timeout = 0): Future[Result[HandleValue, ErrorCode]]
     {.async.} =
+  ## Notification/Indication を受信する。
   let res = await self.gatt.waitNotify(timeout)
   if res.isErr:
     return res.error.err
