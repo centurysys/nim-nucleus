@@ -10,6 +10,7 @@ import ./ble/[
 import ./lib/[
   asyncsync,
   errcode,
+  mailbox,
   syslog
 ]
 import results
@@ -23,5 +24,6 @@ export
   util,
   asyncsync,
   errcode,
+  mailbox,
   syslog,
   results

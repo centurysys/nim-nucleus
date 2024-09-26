@@ -9,7 +9,7 @@ import std/tables
 import std/times
 import results
 import nim_nucleus/submodule
-export results, asyncsync
+export results, asyncsync, mailbox
 export SecurityMode, IoCap, PeerAddr
 export HandleValue, ErrorCode
 export util
@@ -584,14 +584,20 @@ proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, Erro
 # ------------------------------------------------------------------------------
 # API: Write Characteristics
 # ------------------------------------------------------------------------------
-proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string):
-    Future[Result[bool, ErrorCode]] {.async.} =
-  ## キャラクタリスティック値を書き込む (ハンドル指定)
-  result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string,
+    withResponse = true): Future[Result[bool, ErrorCode]] {.async.} =
+  if withResponse:
+    ## キャラクタリスティック値を書き込む (ハンドル指定)
+    result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+  else:
+    result = await self.gatt.gattWriteWithoutResponse(handle, value)
 
-proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8):
-    Future[Result[bool, ErrorCode]] {.async.} =
-  result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+proc writeGattChar*(self: Gatt, handle: uint16, value: uint16|uint8,
+    withResponse = true): Future[Result[bool, ErrorCode]] {.async.} =
+  if withResponse:
+    result = await self.gatt.gattWriteCharacteristicValue(handle, value)
+  else:
+    result = await self.gatt.gattWriteWithoutResponse(handle, value)
 
 # ------------------------------------------------------------------------------
 # API: Read Descriptors

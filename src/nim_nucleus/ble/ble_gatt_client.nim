@@ -273,6 +273,32 @@ proc gattReadCharacteristicDescriptors*(self: GattClient, handle: uint16):
   result = ok(res_opt.get.descs)
 
 # ------------------------------------------------------------------------------
+# 1.5.46: GATT Write Without Response 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gattWriteWithoutResponse*(self: GattClient, handle: uint16,
+    value: seq[uint8|char]|string): Future[Result[bool, ErrorCode]] {.async.} =
+  const
+    procName = "gattWriteWithoutResponse"
+    insOpc = BTM_D_OPC_BLE_GATT_C_WRITE_WITHOUT_RESPONSE_INS
+    cfmOpc = BTM_D_OPC_BLE_GATT_C_WRITE_WITHOUT_RESPONSE_CFM
+    evtOpc = BTM_D_OPC_BLE_GATT_C_WRITE_WITHOUT_RESPONSE_EVT
+  var buf: array[520, uint8]
+  self.setOpcGattId(buf, insOpc)
+  buf.setLe16(4, handle)
+  buf.setLe16(6, value.len.uint16)
+  copyMem(addr buf[8], addr value[0], value.len)
+  let response_res = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
+  if response_res.isErr:
+    return err(response_res.error)
+  let response = response_res.get()
+  let res = response.parseGattEventCommon()
+  if res.gattResult != 0:
+    logGattResult(procName, res.gattResult, detail = true)
+    result = err(ErrorCode.GattError)
+  else:
+    result = ok(true)
+
+# ------------------------------------------------------------------------------
 # 1.5.52: GATT Write Characteristic Value 指示->確認->通知
 # ------------------------------------------------------------------------------
 proc gattWriteCharacteristicValue*(self: GattClient, handle: uint16,
