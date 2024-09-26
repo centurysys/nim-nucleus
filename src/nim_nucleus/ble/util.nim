@@ -5,6 +5,7 @@ import std/strutils
 import std/times
 import ./common/common_types
 import ../lib/syslog
+export common_types
 export bdAddr2string
 
 # ------------------------------------------------------------------------------

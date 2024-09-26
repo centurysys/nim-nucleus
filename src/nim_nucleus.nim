@@ -537,6 +537,16 @@ proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.asyn
   result = await self.gatt.waitEncryptionComplete()
 
 # ------------------------------------------------------------------------------
+# API: Discover Characteristics by UUID
+# ------------------------------------------------------------------------------
+proc discoverCharacteristicsByUuid*(self: Gatt, uuid: Uuid):
+    Future[Result[GattCharacteristicsOfService, ErrorCode]] {.async.} =
+  const
+    startHandle = 0x0001'u16
+    endHandle = 0xffff'u16
+  result = await self.gatt.gattDiscoverCharacteristicsByUuid(startHandle, endHandle, uuid)
+
+# ------------------------------------------------------------------------------
 # API: Read Characteristics (handle)
 # ------------------------------------------------------------------------------
 proc readGattChar*(self: Gatt, handle: uint16): Future[Result[seq[uint8], ErrorCode]]
