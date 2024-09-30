@@ -592,8 +592,8 @@ proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, Erro
 # ------------------------------------------------------------------------------
 proc writeGattChar*(self: Gatt, handle: uint16, value: seq[uint8|char]|string,
     withResponse = true): Future[Result[bool, ErrorCode]] {.async.} =
+  ## キャラクタリスティック値を書き込む (ハンドル指定)
   if withResponse:
-    ## キャラクタリスティック値を書き込む (ハンドル指定)
     result = await self.gatt.gattWriteCharacteristicValue(handle, value)
   else:
     result = await self.gatt.gattWriteWithoutResponse(handle, value)
@@ -618,7 +618,12 @@ proc readGattDescriptor*(self: Gatt, handle: uint16): Future[Result[seq[uint8], 
 # ------------------------------------------------------------------------------
 proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: uint16):
     Future[Result[bool, ErrorCode]] {.async.} =
+  ## ディスクリプタ値を書き込む (ハンドル指定)
   result = await self.gatt.gattWriteCharacteristicDescriptors(handle, desc)
+
+proc writeGattDescriptor*(self: Gatt, handle: uint16, desc: CCC):
+    Future[Result[bool, ErrorCode]] {.async.} =
+  result = await self.gatt.gattWriteCharacteristicDescriptors(handle, desc.uint16)
 
 # ------------------------------------------------------------------------------
 # API: Wait Notification
