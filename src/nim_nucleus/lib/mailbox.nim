@@ -106,7 +106,7 @@ proc close*[T](self: Mailbox[T]) =
 proc receive*[T](self: Mailbox[T], timeout: int = 0): Future[Result[T, ErrorCode]]
     {.async.} =
   if self.closed:
-    result = err(ErrorCode.Disconnected)
+    return err(ErrorCode.Disconnected)
   if self.fut.isNil:
     self.fut = self.queue.get()
   var res: T
