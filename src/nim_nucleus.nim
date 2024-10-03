@@ -188,6 +188,19 @@ proc handleDisconnectionComplete(self: BleNim, event: DisconnectionCompleteEvent
       gatt.connected = false
 
 # ------------------------------------------------------------------------------
+# GATT: 切断通知
+# ------------------------------------------------------------------------------
+proc handleGattDisconnection(self: BleNim, event: GattDisconEvent)
+    {.async.} =
+  let gattId = event.common.gattId
+  let peer_opt = await self.ble.handleGattDisconnection(gattId)
+  if peer_opt.isSome:
+    let peer = peer_opt.get()
+    let gatt = self.tblGatt.getOrDefault(peer)
+    if not gatt.isNil:
+      gatt.connected = false
+
+# ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
 # ------------------------------------------------------------------------------
 proc eventHandler(self: BleNim) {.async.} =
@@ -233,6 +246,10 @@ proc eventHandler(self: BleNim) {.async.} =
       # LE Disconnection Complete 通知
       let data = notify.leDisconData
       await self.handleDisconnectionComplete(data)
+    of GattCmnDisconnect:
+      # GATT 切断通知 (0x40BB)
+      let data = notify.gattDisconData
+      await self.handleGattDisconnection(data)
     else:
       let eventName = notify.event.symbolName
       let logmsg = &"* eventHandler: unhandled event: {eventName}"
