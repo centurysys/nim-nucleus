@@ -198,6 +198,7 @@ proc handleGattDisconnection(self: BleNim, event: GattDisconEvent)
     let peer = peer_opt.get()
     let gatt = self.tblGatt.getOrDefault(peer)
     if not gatt.isNil:
+      discard await gatt.gatt.disconnect()
       gatt.connected = false
 
 # ------------------------------------------------------------------------------
@@ -543,13 +544,24 @@ proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1
 # ------------------------------------------------------------------------------
 proc disconnect*(self: Gatt, unpair = false) {.async.} =
   ## 接続されている GATT 接続の切断を行う。
+  if self.gatt.isNil:
+    let errmsg = "! Gatt::disconnect: already disconnected."
+    syslog.error(errmsg)
+    return
   discard await self.gatt.disconnect()
   if unpair:
     discard await self.ble.removeRemoteCollectionKeys(self.peer)
   let peer = self.peer
   if self.ble.tblGatt.hasKey(peer):
     self.ble.tblGatt.del(peer)
+  self.connected = false
   self.gatt = nil
+
+# ------------------------------------------------------------------------------
+# API:
+# ------------------------------------------------------------------------------
+proc isConnected*(self: Gatt): bool =
+  result = self.connected
 
 # ------------------------------------------------------------------------------
 # API: Wait Encryption Complete

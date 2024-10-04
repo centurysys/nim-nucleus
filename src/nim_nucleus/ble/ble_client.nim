@@ -317,8 +317,6 @@ proc responseHandler(self: BleClient) {.async.} =
         discard await self.putAdvertising(opc, response)
       of OpcKind.MainResponses:
         self.debugEcho(" -> OPC_MAIN_RESPONSES")
-        if self.lck.locked:
-          self.lck.release()
         discard await self.putResponse(opc, response)
       of OpcKind.MainEvents:
         self.debugEcho(" -> OPC_MAIN_EVENTS")
@@ -335,9 +333,6 @@ proc responseHandler(self: BleClient) {.async.} =
       else:
         self.debugEcho("OPC not found")
         continue
-      # 他のtaskにまわす
-      if hasPendingOperations():
-        poll(1)
       GC_fullCollect()
 
 # ==============================================================================
@@ -347,7 +342,6 @@ proc taskSender(self: BleClient) {.async.} =
   var
     fut_cmd: Future[Result[string, ErrorCode]]
     fut_gatt: Future[Result[string, ErrorCode]]
-    fut_lck: Future[void]
   while true:
     var
       payload: string
@@ -357,17 +351,11 @@ proc taskSender(self: BleClient) {.async.} =
       fut_cmd = self.cmdMbx.receive()
     if fut_gatt.isNil:
       fut_gatt = self.gattMbx.receive()
-    if fut_lck.isNil:
-      fut_lck = self.lck.acquire()
-    await (fut_cmd and fut_lck) or fut_gatt
-    if fut_lck.finished and fut_cmd.finished:
+    await fut_cmd or fut_gatt
+    if fut_cmd.finished:
       let payload_res = fut_cmd.read()
-      fut_lck.read()
       fut_cmd = nil
-      fut_lck = nil
-      if payload_res.isErr:
-        self.lck.release()
-      else:
+      if payload_res.isOk:
         payload = payload_res.get()
         isCmd = true
     if (not isCmd) and fut_gatt.finished:
@@ -383,9 +371,9 @@ proc taskSender(self: BleClient) {.async.} =
       # ???
       continue
     let res = btmSend(payload)
-    if (not res) and isCmd and self.lck.locked:
-      # コマンド送信失敗なので Lock をリリースする
-      self.lck.release()
+    if not res:
+      let logmsg = "! taskSender: btmSend() failed."
+      syslog.error(logmsg)
 
 proc taskDummy(self: BleClient) {.async.} =
   while true:
@@ -440,10 +428,13 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
     asyncCheck self.taskDummy()
     asyncCheck self.responseHandler()
     asyncCheck self.taskSender()
+  else:
+    if not self.lck.locked:
+      self.lck.own()
+  defer: self.lck.release()
   self.debugEcho("BTM_Start()")
   let res = btmStart(BtmMode.Normal)
   if not res:
-    self.lck.release()
     let errmsg = &"! BleClient::init start BTM failed with {res}."
     syslog.error(errmsg)
     return
@@ -472,6 +463,8 @@ proc btmSend(self: BleClient, payload: string): Future[Result[bool, ErrorCode]]
 # ------------------------------------------------------------------------------
 proc btmSendRecv*(self: BleClient, payload: string, timeout = 0):
     Future[Result[string, ErrorCode]] {.async.} =
+  await self.lck.acquire()
+  defer: self.lck.release()
   let res = await self.btmSend(payload)
   if res.isErr:
     return err(res.error)
@@ -719,6 +712,12 @@ proc waitEncryptionComplete*(self: GattClient): Future[Result[bool, ErrorCode]]
     result = err(ErrorCode.Disconnected)
   else:
     result = ok(true)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isConnected*(self: GattClient): bool =
+  result = self.connected
 
 # ------------------------------------------------------------------------------
 #
