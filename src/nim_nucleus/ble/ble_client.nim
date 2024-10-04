@@ -379,7 +379,7 @@ proc taskSender(self: BleClient) {.async.} =
         payload = payload_res.get()
       else:
         continue
-    if not self.bmtStarted:
+    if not self.btmStarted:
       continue
     if payload.len == 0:
       # ???
