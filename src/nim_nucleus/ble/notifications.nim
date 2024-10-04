@@ -10,7 +10,7 @@ import ../lib/syslog
 type
   BleEvent* {.pure.} = enum
     GapAdvertising = "GAP Advertising"
-    GapConenctionComplete = "GAP Conenction Completed"
+    GapConnectionComplete = "GAP Connection Completed"
     GapDisconnectionComplete = "GAP Disconnection Completed"
     GapConnectionUpdate = "GAP Connection Update"
     GapReadRemoteUsedFeatures = "GAP Read Remote Used Features"
@@ -43,7 +43,7 @@ type
     of GapAdvertising:
       # LE Advertising Report 通知 (0x4017)
       advData*: AdvertisingReport
-    of GapConenctionComplete:
+    of GapConnectionComplete:
       # LE Enhanced Connection Complete 通知 (0x419F)
       leConData*: ConnectionCompleteEvent
     of GapDisconnectionComplete:
@@ -126,7 +126,7 @@ proc parseEvent*(payload: string): Option[Notification] =
   of BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT:
     let data = payload.parseConnectionComplete()
     if data.isSome:
-      let res = Notification(event: GapConenctionComplete,
+      let res = Notification(event: GapConnectionComplete,
           leConData: data.get(), valid: true)
       result = some(res)
   of BTM_D_OPC_BLE_GAP_DISCONNECTION_COMPLETE_EVT:

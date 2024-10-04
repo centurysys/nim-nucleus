@@ -147,7 +147,7 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
       continue
     let msg = msg_opt.get()
     case msg.event:
-    of GapConenctionComplete:
+    of GapConnectionComplete:
       # LE Connection Complete 通知
       conHandle = some(msg.leConData.conHandle)
     of GattCmnConnect:
