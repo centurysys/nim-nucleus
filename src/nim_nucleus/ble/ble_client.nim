@@ -52,7 +52,7 @@ type
   BleClientObj = object
     debug: bool
     debugBtm: bool
-    bmtStarted: bool
+    btmStarted: bool
     running: bool
     event: Event
     callbackInitialized: bool
@@ -96,7 +96,7 @@ var
 # ------------------------------------------------------------------------------
 proc `=destroy`(x: BleClientObj) =
   try:
-    if x.bmtStarted:
+    if x.btmStarted:
       discard btmStart(BtmMode.Shutdown)
   except:
     discard
@@ -424,7 +424,7 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
 # API: BTM 初期化
 # ------------------------------------------------------------------------------
 proc initBTM*(self: BleClient): Future[bool] {.async.} =
-  if self.bmtStarted:
+  if self.btmStarted:
     return true
   if not self.callbackInitialized:
     discard setBtSnoopLog(true, "/tmp", (10 * 1024 * 1024).uint32)
@@ -456,7 +456,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
   let pkt = pkt_res.get()
   self.debugEcho(&"--> received: {pkt.len} bytes.")
   self.debugEcho(pkt.hexDump)
-  self.bmtStarted = true
+  self.btmStarted = true
   result = true
 
 # ------------------------------------------------------------------------------
@@ -465,7 +465,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
 proc btmSend(self: BleClient, payload: string): Future[Result[bool, ErrorCode]]
     {.async.} =
   await self.clearResponse()
-  if not self.bmtStarted or payload.len == 0:
+  if not self.btmStarted or payload.len == 0:
     return
   result = await self.cmdMbx.put(payload)
 
