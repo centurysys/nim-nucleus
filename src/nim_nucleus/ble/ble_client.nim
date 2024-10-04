@@ -541,6 +541,23 @@ proc handleDisconnectionComplete*(self: BleClient, conHandle: uint16):
       result = some(peer)
       break
 
+# ------------------------------------------------------------------------------
+# API: Handle Gatt Disconnection
+# ------------------------------------------------------------------------------
+proc handleGattDisconnection*(self: BleClient, gattId: uint16):
+    Future[Option[PeerAddr]] {.async.} =
+  let gattClient = self.gattClients.getOrdefault(gattId, nil)
+  if gattClient.isNil:
+    return
+  gattClient.connected = false
+  if gattClient.encryptionWait.locked:
+    let logmsg = "* handleGattDisconnection: release EncryptionWait lock."
+    syslog.info(logmsg)
+    gattClient.encrypted = false
+    gattClient.encryptionWait.release()
+  let peer = gattClient.peer
+  result = some(peer)
+
 # ==============================================================================
 # GATT Client
 # ==============================================================================
