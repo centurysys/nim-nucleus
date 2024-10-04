@@ -120,15 +120,13 @@ proc debugEcho*(self: BleClient, msg: string, header = true) =
 # ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
-proc cmdCallback(buf: seq[byte]) =
+proc cmdCallback(buf: string) =
   let callbackTime = now()
   let msg = new CallbackMsg
-  msg.msg = buf.toString
+  msg.msg = buf
   msg.timestamp = callbackTime
   ev.deque.addLast(msg)
   ev.ev.fire()
-  if hasPendingOperations():
-    poll(1)
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
