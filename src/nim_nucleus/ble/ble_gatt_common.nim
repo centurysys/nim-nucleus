@@ -116,6 +116,12 @@ proc gattCommonConnectCancelIns*(self: BleClient): Future[Result[bool, ErrorCode
 proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
     Future[Result[GattClient, ErrorCode]] {.async.} =
   const procName = "gattConnect"
+  const waitingEvents = @[
+    BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT,
+    BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT,
+  ]
+  self.setupEventsForApplication(waitingEvents)
+  defer: self.setupEventsForApplication()
   let gattRes_res = await self.gattCommonConnectIns(params)
   if gattRes_res.isErr:
     syslog.error(&"! {procName}: GATT connection failed, {gattRes_res.error}")
@@ -128,10 +134,6 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
   var
     gattId: Option[uint16]
     conHandle: Option[uint16]
-  const waitingEvents = @[
-    BTM_D_OPC_BLE_GAP_CONNECTION_COMPLETE_EVT,
-    BTM_D_OPC_BLE_GATT_CMN_CONNECT_EVT,
-  ]
   while true:
     let payload_res = await self.waitAppEvent(waitingEvents, timeout)
     if payload_res.isErr:
@@ -169,7 +171,6 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
         client.peer = params.peer
         result = ok(client)
       break
-  discard await self.waitAppEvent(@[])
 
 # ------------------------------------------------------------------------------
 # Disconnect

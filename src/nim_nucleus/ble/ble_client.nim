@@ -224,12 +224,22 @@ proc waitEvent*(self: BleClient, timeout: int = 0): Future[Result[string, ErrorC
     syslog.error(&"! waitEvent: {err}")
 
 # ------------------------------------------------------------------------------
+# Setup Waiting Event for Applications
+# ------------------------------------------------------------------------------
+proc setupEventsForApplication*(self: BleClient, events: seq[uint16] = @[]) =
+  if events.len > 0:
+    self.waitingEvents = events
+  else:
+    self.waitingEvents.setLen(0)
+
+# ------------------------------------------------------------------------------
 # Wait Event Mailbox (for Applications)
 # ------------------------------------------------------------------------------
 proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
     oneshot = false): Future[Result[string, ErrorCode]] {.async.} =
   if events.len > 0:
     self.waitingEvents = events
+    debugEcho(&"==== waitAppEvents: events.len: {events.len}...")
     result = await self.appEventMbx.get(timeout)
   if events.len == 0 or oneshot:
     self.waitingEvents.setLen(0)
@@ -656,7 +666,7 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
       return err(response_res.error)
     let response = response_res.get()
     let resOpc = response.payload.getOpc()
-    if  resOpc != evtOpc:
+    if resOpc != evtOpc:
       if resOpc == BTM_D_OPC_BLE_GATT_C_EXCHANGE_MTU_EVT:
         self.gattHandleExchangeMtuEvent(response.payload)
         continue
