@@ -732,13 +732,14 @@ when isMainModule:
 
   proc handleGatt(self: Gatt) {.async.} =
     asyncCheck self.notificationHandler()
-    echo "*** Wait for Encryption complete..."
-    let enc_res = await self.waitEncryptionComplete()
-    if enc_res.isOk:
-      echo " --> Encryption completed."
-    else:
-      echo "!!! Disconnected ??"
-      return
+    when false:
+      echo "*** Wait for Encryption complete..."
+      let enc_res = await self.waitEncryptionComplete()
+      if enc_res.isOk:
+        echo " --> Encryption completed."
+      else:
+        echo "!!! Disconnected ??"
+        return
     const items = [CharaUuid.DeviceName, CharaUuid.ModelNumber,
         CharaUuid.HardwareRevision, CharaUuid.FirmwareRevision,
         CharaUuid.SoftwareRevision, CharaUuid.ManufactureName]

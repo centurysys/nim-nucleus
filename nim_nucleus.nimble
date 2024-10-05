@@ -7,7 +7,7 @@ license       = "MIT"
 srcDir        = "src"
 binDir        = "bin"
 installExt    = @["nim"]
-bin           = @["nim_nucleus"]
+bin           = @["btmd"]
 
 
 # Dependencies

@@ -1,4 +1,5 @@
 import std/asyncdispatch
+import std/asyncnet
 import std/deques
 import std/options
 import std/strformat
@@ -10,7 +11,6 @@ import ../lib/asyncsync
 import ../lib/errcode
 import ../lib/mailbox
 import ../lib/syslog
-import ./btm
 import ./core/gatt_result
 import ./core/hci_status
 import ./core/opc
@@ -23,14 +23,6 @@ export opc, mailbox
 export GattEventCommon, GattHandleValue, ErrorCode
 
 type
-  CallbackMsg = ref object
-    msg: string
-    timestamp: DateTime
-  EventObj = object
-    deque: Deque[CallbackMsg]
-    ev: AsyncEv
-    initialized: bool
-  Event = ptr EventObj
   GattConfirmObj = object
     opc: uint16
     gattId*: uint16
@@ -51,12 +43,8 @@ type
   GattMailboxesPtr* = ptr GattMailboxes
   BleClientObj = object
     debug: bool
-    debugBtm: bool
-    btmStarted: bool
     running: bool
-    event: Event
-    callbackInitialized: bool
-    btmMode: BtmMode
+    sock: AsyncSocket
     localAddr: array[6, uint8]
     lck: AsyncLock
     cmdMbx: Mailbox[string]
@@ -84,27 +72,10 @@ type
     connected: bool
   GattClient* = ref GattClientObj
 
-const
-  DEQUE_SIZE = 128
-
-var
-  ev: EventObj
-  logEv: EventObj
-
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc `=destroy`(x: BleClientObj) =
-  try:
-    if x.btmStarted:
-      discard btmStart(BtmMode.Shutdown)
-  except:
-    discard
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc formatTime(dt: DateTime): string {.inline.} =
+proc formatTime(dt: DateTime): string {.inline, used.} =
   let t = now().toTime
   let microsec = int64(t.toUnixFloat * 1000000.0) mod 1000000
   let nowTime = t.format("yyyy/MM/dd HH:mm:ss")
@@ -116,42 +87,6 @@ proc formatTime(dt: DateTime): string {.inline.} =
 proc debugEcho*(self: BleClient, msg: string, header = true) =
   if self.debug:
     debugEcho(msg, header)
-
-# ------------------------------------------------------------------------------
-# BTM Callback
-# ------------------------------------------------------------------------------
-proc cmdCallback(buf: string) =
-  let callbackTime = now()
-  let msg = new CallbackMsg
-  msg.msg = buf
-  msg.timestamp = callbackTime
-  ev.deque.addLast(msg)
-  ev.ev.fire()
-
-# ------------------------------------------------------------------------------
-# BTM Callback (debug log)
-# ------------------------------------------------------------------------------
-proc debugLogCallback(logtext: string) =
-  let msg = new CallbackMsg
-  msg.msg = logtext
-  msg.timestamp = now()
-  logEv.deque.addLast(msg)
-  if not logEv.ev.isSet:
-    logev.ev.fire()
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc logHandler() {.async.} =
-  while true:
-    await logEv.ev.wait()
-    logEv.ev.clear()
-    while logEv.deque.len > 0:
-      let msg = logEv.deque.popFirst()
-      let microSec = int64(msg.timestamp.toTime.toUnixFloat * 1000000.0) mod 1000000
-      let dateTime = msg.timestamp.format("yyyy/MM/dd HH:mm:ss")
-      let logmsg = &"[BTM {dateTime}.{microSec:06d}] {msg.msg}"
-      echo logmsg
 
 # ------------------------------------------------------------------------------
 # Put to Response Mailbox
@@ -308,42 +243,39 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
   while true:
-    await self.event.ev.wait()
-    self.event.ev.clear()
-    while self.event.deque.len > 0:
-      let msg = self.event.deque.popFirst()
-      let response = msg.msg
-      if response.len < 3:
-        self.debugEcho("! responseHandler: ?????")
-        continue
-      let opc = response.getOpc()
-      let opcKind = opc.opc2kind()
-      if self.debug:
-        let callbackTime = msg.timestamp.formatTime
-        self.debugEcho(&"### Response from BTM: OPC: [{opc:04X}] -> {opcKind} ({callbackTime})")
-      case opcKind
-      of OpcKind.GapAdvertise:
-        self.debugEcho(" -> OPC_GAP_ADVERTISING")
-        discard await self.putAdvertising(opc, response)
-      of OpcKind.MainResponses:
-        self.debugEcho(" -> OPC_MAIN_RESPONSES")
-        discard await self.putResponse(opc, response)
-      of OpcKind.MainEvents:
-        self.debugEcho(" -> OPC_MAIN_EVENTS")
-        discard await self.putEvent(opc, response)
-      of OpcKind.GattClientConfirmations:
-        self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
-        await self.gattResponseHandler(opc, response)
-      of OpcKind.GattClientEvents:
-        self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
-        await self.gattEventHandler(opc, response)
-      of OpcKind.GattClientNotifications:
-        self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
-        await self.gattNotifyHandler(opc, response)
-      else:
-        self.debugEcho("OPC not found")
-        continue
-      GC_fullCollect()
+    let hdr = await self.sock.recv(2)
+    let pktlen = hdr.getLe16(0).int
+    let response = await self.sock.recv(pktlen)
+    if response.len < 3:
+      self.debugEcho("! responseHandler: ?????")
+      continue
+    let opc = response.getOpc()
+    let opcKind = opc.opc2kind()
+    case opcKind
+    of OpcKind.GapAdvertise:
+      self.debugEcho(" -> OPC_GAP_ADVERTISING")
+      discard await self.putAdvertising(opc, response)
+    of OpcKind.MainResponses:
+      self.debugEcho(" -> OPC_MAIN_RESPONSES")
+      discard await self.putResponse(opc, response)
+    of OpcKind.MainEvents:
+      self.debugEcho(" -> OPC_MAIN_EVENTS")
+      discard await self.putEvent(opc, response)
+    of OpcKind.GattClientConfirmations:
+      self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
+      await self.gattResponseHandler(opc, response)
+    of OpcKind.GattClientEvents:
+      self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
+      await self.gattEventHandler(opc, response)
+    of OpcKind.GattClientNotifications:
+      self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
+      await self.gattNotifyHandler(opc, response)
+    else:
+      self.debugEcho("OPC not found")
+      continue
+    if hasPendingOperations():
+      poll(1)
+    GC_fullCollect()
 
 # ==============================================================================
 # BTM Task: Sender
@@ -356,6 +288,7 @@ proc taskSender(self: BleClient) {.async.} =
     var
       payload: string
       isCmd: bool = false
+      hdr: uint16
     payload.setLen(0)
     if fut_cmd.isNil:
       fut_cmd = self.cmdMbx.receive()
@@ -375,88 +308,47 @@ proc taskSender(self: BleClient) {.async.} =
         payload = payload_res.get()
       else:
         continue
-    if not self.btmStarted:
-      continue
     if payload.len == 0:
       # ???
       continue
-    let res = btmSend(payload)
-    if not res:
-      let logmsg = "! taskSender: btmSend() failed."
-      syslog.error(logmsg)
+    hdr = payload.len.uint16
+    await self.sock.send(addr hdr, hdr.sizeOf)
+    await self.sock.send(payload)
 
 proc taskDummy(self: BleClient) {.async.} =
   while true:
     await sleepAsync(10000)
 
 # ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc initEvent(ev: ptr EventObj, dequeSize: int = DEQUE_SIZE): bool =
-  if not ev.initialized:
-    ev.ev = newAsyncEv()
-    ev.deque = initDeque[CallbackMsg](dequeSize)
-    ev.initialized = true
-    result = true
-
-# ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
 proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   new result
-  discard initEvent(addr ev)
-  discard initEvent(addr logEv)
-  result.event = addr ev
   result.mainAdvMbx = newMailbox[string](10)
   result.mainRespMbx = newMailbox[string](5)
   result.mainEventMbx = newMailbox[string](5)
   result.appEventMbx = newMailbox[string](5)
   result.cmdMbx = newMailbox[string](8)
   result.gattMbx = newMailbox[string](8)
+  result.lck = newAsyncLock()
   result.debug = debug
-  result.debugBtm = debug_stack
+  result.sock = newAsyncSocket()
+  asyncCheck result.responseHandler()
+  asyncCheck result.taskSender()
+  asyncCheck result.taskDummy()
 
 # ------------------------------------------------------------------------------
-# API: BTM 初期化
+# Initialize
 # ------------------------------------------------------------------------------
 proc initBTM*(self: BleClient): Future[bool] {.async.} =
-  if self.btmStarted:
-    return true
-  if not self.callbackInitialized:
-    discard setBtSnoopLog(true, "/tmp", (10 * 1024 * 1024).uint32)
-    let res = setCallback(cmdCallback)
-    if not res:
-      let errmsg = &"! BleClient::init set callback failed with {res}."
-      syslog.error(errmsg)
-      return
-    if self.debugBtm:
-      discard setDebugLogCallback(debugLogCallback)
-      asyncCheck logHandler()
-    self.lck = newAsyncLock()
-    self.lck.own()
-    self.callbackInitialized = true
-    asyncCheck self.taskDummy()
-    asyncCheck self.responseHandler()
-    asyncCheck self.taskSender()
-  else:
-    if not self.lck.locked:
-      self.lck.own()
-  defer: self.lck.release()
-  self.debugEcho("BTM_Start()")
-  let res = btmStart(BtmMode.Normal)
-  if not res:
-    let errmsg = &"! BleClient::init start BTM failed with {res}."
-    syslog.error(errmsg)
-    return
-  self.debugEcho("wait...")
-  let pkt_res = await self.mainRespMbx.get()
-  if pkt_res.isErr:
-    return
-  let pkt = pkt_res.get()
-  self.debugEcho(&"--> received: {pkt.len} bytes.")
-  self.debugEcho(pkt.hexDump)
-  self.btmStarted = true
-  result = true
+  try:
+    echo "* initBTM(), connecting..."
+    await self.sock.connect("localhost", Port(5963))
+    echo " -> connected."
+    result = true
+  except:
+    echo "initBTM exception."
+    result = false
 
 # ------------------------------------------------------------------------------
 # Send Command
@@ -464,7 +356,7 @@ proc initBTM*(self: BleClient): Future[bool] {.async.} =
 proc btmSend(self: BleClient, payload: string): Future[Result[bool, ErrorCode]]
     {.async.} =
   await self.clearResponse()
-  if not self.btmStarted or payload.len == 0:
+  if payload.len == 0:
     return
   result = await self.cmdMbx.put(payload)
 
