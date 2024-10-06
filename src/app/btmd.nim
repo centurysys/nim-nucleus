@@ -1,12 +1,10 @@
-import std/asyncdispatch
-import std/deques
-import std/asyncnet
+import std/net
+import std/options
 import std/strformat
 import std/times
 import results
 import ../nim_nucleuspkg/ble/btm
 import ../nim_nucleuspkg/ble/util
-import ../nim_nucleuspkg/lib/asyncsync
 import ../nim_nucleuspkg/lib/syslog
 import ../nim_nucleuspkg/lib/mailbox
 
@@ -15,8 +13,7 @@ type
     timestamp: DateTime
     msg: string
   EventObj = object
-    deque: Deque[CallbackMsg]
-    ev: AsyncEv
+    mbox: Mailbox[CallbackMsg]
     initialized: bool
   Event = ptr EventObj
   BtmServerObj = object
@@ -26,94 +23,44 @@ type
     debugBtm: bool
     event: Event
     btmMbox: Mailbox[CallbackMsg]
-    serverSock: AsyncSocket
-    clientSock: AsyncSocket
+    serverSock: Socket
+    clientSock: Socket
   BtmServer = ref BtmServerObj
   AppOptions = object
     port: Port
 
-const
-  DEQUE_SIZE = 128
-
 var
-  ev: EventObj
-  logEv: EventObj
+  sock_opt: Option[Socket]
 
 # ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
 proc cmdCallback(buf: string) =
-  let msg = new CallbackMsg
-  msg.msg = buf
-  ev.deque.addLast(msg)
-  ev.ev.fire()
-#  if hasPendingOperations():
-#    poll(5)
+  if sock_opt.isSome:
+    let sock = sock_opt.get()
+    let hdr = buf.len.uint16
+    discard sock.send(addr hdr, hdr.sizeOf)
+    sock.send(buf)
+  else:
+    echo &"! cmdCallback: {buf.len} bytes discarded."
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
 # ------------------------------------------------------------------------------
 proc debugLogCallback(logtext: string) =
-  let msg = new CallbackMsg
-  msg.msg = logtext
-  msg.timestamp = now()
-  logEv.deque.addLast(msg)
-  if not logEv.ev.isSet:
-    logev.ev.fire()
-
-# ------------------------------------------------------------------------------
-# BTM Task: Response Handler
-# ------------------------------------------------------------------------------
-proc responseHandler(self: BtmServer) {.async.} =
-  while true:
-    await self.event.ev.wait()
-    self.event.ev.clear()
-    while self.event.deque.len > 0:
-      let msg = self.event.deque.popFirst()
-      let response = msg.msg
-      if response.len < 3:
-        echo("! responseHandler: ?????")
-        continue
-      discard await self.btmMbox.put(msg)
-      if hasPendingOperations():
-        poll(1)
-    GC_fullCollect()
-
-# ------------------------------------------------------------------------------
-# BTM Task: Log Handler
-# ------------------------------------------------------------------------------
-proc logHandler() {.async.} =
-  while true:
-    await logEv.ev.wait()
-    logEv.ev.clear()
-    while logEv.deque.len > 0:
-      let msg = logEv.deque.popFirst()
-      let microSec = int64(msg.timestamp.toTime.toUnixFloat * 1000000.0) mod 1000000
-      let dateTime = msg.timestamp.format("yyyy/MM/dd HH:mm:ss")
-      let logmsg = &"[BTM {dateTime}.{microSec:06d}] {msg.msg}"
-      echo logmsg
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc initEvent(ev: ptr EventObj, dequeSize: int = DEQUE_SIZE): bool =
-  if not ev.initialized:
-    ev.ev = newAsyncEv()
-    ev.deque = initDeque[CallbackMsg](dequeSize)
-    ev.initialized = true
-    result = true
+  #let msg = new CallbackMsg
+  #msg.msg = logtext
+  #msg.timestamp = now()
+  #discard logEv.mbox.putNoWait(msg)
+  echo logtext
 
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
 proc newBtmServer(opt: AppOptions): BtmServer =
   new result
-  discard initEvent(addr ev)
-  discard initEvent(addr logEv)
-  result.event = addr ev
-  result.btmMbox = newMailbox[CallbackMsg](64)
   result.debugBtm = false
-  let sock = newAsyncSocket()
+  let sock = newSocket()
   sock.setSockOpt(OptReuseAddr, true)
   sock.bindAddr(opt.port, "localhost")
   sock.listen()
@@ -122,7 +69,7 @@ proc newBtmServer(opt: AppOptions): BtmServer =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc initBtm(self: BtmServer): Future[bool] {.async.} =
+proc initBtm(self: BtmServer): bool =
   if self.btmStarted:
     return true
   if not self.callbackInitialized:
@@ -134,32 +81,25 @@ proc initBtm(self: BtmServer): Future[bool] {.async.} =
       return
     if self.debugBtm:
       discard setDebugLogCallback(debugLogCallback)
-      asyncCheck logHandler()
     self.callbackInitialized = true
-    asyncCheck self.responseHandler()
   let res = btmStart(BtmMode.Normal)
   if not res:
     let errmsg = &"! BleClient::init start BTM failed with {res}."
     syslog.error(errmsg)
     return
-  let pkt_res = await self.btmMbox.get()
-  if pkt_res.isErr:
-    return
-  let pkt = pkt_res.get()
-  discard pkt
   self.btmStarted = true
   result = true
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc handleClientRecv(self: BtmServer) {.async.} =
+proc handleClientRecv(self: BtmServer) =
   while true:
-    let hdr = await self.clientSock.recv(2)
+    let hdr = self.clientSock.recv(2)
     if hdr.len == 0:
       break
     let length = hdr.getLe16(0).int
-    let buf = await self.clientSock.recv(length)
+    let buf = self.clientSock.recv(length)
     if buf.len == 0:
       break
     discard btmSend(buf)
@@ -167,40 +107,17 @@ proc handleClientRecv(self: BtmServer) {.async.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc handleClientSend(self: BtmServer) {.async.} =
+proc run(self: BtmServer) =
+  discard self.initBtm()
   while true:
-    let resp_res = await self.btmMbox.get()
-    if resp_res.isErr:
-      break
-    if self.clientSock.isNil:
-      continue
-    let resp = resp_res.get
-    var hdr: array[2, uint8]
-    hdr.setLe16(0, resp.msg.len.uint16)
-    await self.clientSock.send(addr hdr, 2)
-    await self.clientSock.send(resp.msg)
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc taskDummy(self: BtmServer) {.async.} =
-  while true:
-    await sleepAsync(10000)
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc run(self: BtmServer) {.async.} =
-  asyncCheck self.taskDummy()
-  asyncCheck self.responseHandler()
-  discard await self.initBtm()
-  asyncCheck self.handleClientSend()
-  while true:
-    let client = await self.serverSock.accept()
-    self.clientSock = client
-    await self.handleClientRecv()
+    var sock: Socket
+    self.serverSock.accept(sock)
+    self.clientSock = sock
+    sock_opt = some(sock)
+    self.handleClientRecv()
     self.clientSock = nil
-    client.close()
+    sock_opt = none(Socket)
+    sock.close()
 
 # ------------------------------------------------------------------------------
 #
@@ -208,10 +125,7 @@ proc run(self: BtmServer) {.async.} =
 proc main(): int =
   let opts = AppOptions(port: Port(5963))
   let btm = newBtmServer(opts)
-  let fut = btm.run()
-  while not fut.finished:
-    poll(50)
-  fut.read()
+  btm.run()
 
 when isMainModule:
   quit main()
