@@ -7,10 +7,12 @@ license       = "MIT"
 srcDir        = "src"
 binDir        = "bin"
 installExt    = @["nim"]
-bin           = @["nim_nucleus"]
+bin           = @["app/btmd"]
+skipDirs      = @["app"]
 
 
 # Dependencies
 
-requires "nim >= 2.0.8"
+requires "nim >= 2.0.10"
 requires "results >= 0.5.0"
+requires "argparse == 0.10.1"
