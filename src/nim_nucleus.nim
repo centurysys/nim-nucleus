@@ -8,7 +8,7 @@ import std/strutils
 import std/tables
 import std/times
 import results
-import nim_nucleus/submodule
+import nim_nucleuspkg/submodule
 export results, asyncsync, mailbox
 export SecurityMode, IoCap, PeerAddr
 export HandleValue, ErrorCode

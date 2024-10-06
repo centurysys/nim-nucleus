@@ -4,11 +4,11 @@ import std/asyncnet
 import std/strformat
 import std/times
 import results
-import nim_nucleus/ble/btm
-import nim_nucleus/ble/util
-import nim_nucleus/lib/asyncsync
-import nim_nucleus/lib/syslog
-import nim_nucleus/lib/mailbox
+import ../nim_nucleuspkg/ble/btm
+import ../nim_nucleuspkg/ble/util
+import ../nim_nucleuspkg/lib/asyncsync
+import ../nim_nucleuspkg/lib/syslog
+import ../nim_nucleuspkg/lib/mailbox
 
 type
   CallbackMsg = ref object
@@ -28,7 +28,7 @@ type
     btmMbox: Mailbox[CallbackMsg]
     serverSock: AsyncSocket
     clientSock: AsyncSocket
-  BtmServer* = ref BtmServerObj
+  BtmServer = ref BtmServerObj
   AppOptions = object
     port: Port
 
@@ -43,11 +43,12 @@ var
 # BTM Callback
 # ------------------------------------------------------------------------------
 proc cmdCallback(buf: string) =
-  echo "* cmdCallback"
   let msg = new CallbackMsg
   msg.msg = buf
   ev.deque.addLast(msg)
   ev.ev.fire()
+#  if hasPendingOperations():
+#    poll(5)
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
@@ -73,7 +74,6 @@ proc responseHandler(self: BtmServer) {.async.} =
       if response.len < 3:
         echo("! responseHandler: ?????")
         continue
-      echo &"* responseHandler: length: {response.len}"
       discard await self.btmMbox.put(msg)
       if hasPendingOperations():
         poll(1)
@@ -107,18 +107,17 @@ proc initEvent(ev: ptr EventObj, dequeSize: int = DEQUE_SIZE): bool =
 # Constructor:
 # ------------------------------------------------------------------------------
 proc newBtmServer(opt: AppOptions): BtmServer =
-  echo "newBtmServer..."
   new result
   discard initEvent(addr ev)
   discard initEvent(addr logEv)
   result.event = addr ev
   result.btmMbox = newMailbox[CallbackMsg](64)
+  result.debugBtm = false
   let sock = newAsyncSocket()
   sock.setSockOpt(OptReuseAddr, true)
   sock.bindAddr(opt.port, "localhost")
   sock.listen()
   result.serverSock = sock
-  echo "--> newBtmServer OK"
 
 # ------------------------------------------------------------------------------
 #
@@ -150,7 +149,6 @@ proc initBtm(self: BtmServer): Future[bool] {.async.} =
   discard pkt
   self.btmStarted = true
   result = true
-  echo "BTM started."
 
 # ------------------------------------------------------------------------------
 #
@@ -161,11 +159,9 @@ proc handleClientRecv(self: BtmServer) {.async.} =
     if hdr.len == 0:
       break
     let length = hdr.getLe16(0).int
-    echo &"* header: pktlen: {length}"
     let buf = await self.clientSock.recv(length)
     if buf.len == 0:
       break
-    echo &"  received len: {buf.len}"
     discard btmSend(buf)
 
 # ------------------------------------------------------------------------------
@@ -181,7 +177,6 @@ proc handleClientSend(self: BtmServer) {.async.} =
     let resp = resp_res.get
     var hdr: array[2, uint8]
     hdr.setLe16(0, resp.msg.len.uint16)
-    echo &"--> send {resp.msg.len} bytes to client."
     await self.clientSock.send(addr hdr, 2)
     await self.clientSock.send(resp.msg)
 
@@ -201,9 +196,7 @@ proc run(self: BtmServer) {.async.} =
   discard await self.initBtm()
   asyncCheck self.handleClientSend()
   while true:
-    echo "*** wait for client."
     let client = await self.serverSock.accept()
-    echo "-> client connected."
     self.clientSock = client
     await self.handleClientRecv()
     self.clientSock = nil
