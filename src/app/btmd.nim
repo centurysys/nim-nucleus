@@ -1,6 +1,7 @@
 import std/locks
 import std/net
 import std/options
+import std/os
 import std/posix
 import std/strformat
 import std/times
@@ -22,9 +23,10 @@ type
     clientSock: Socket
   BtmServer = ref BtmServerObj
   AppOptions = object
-    port: Port
+    path: string
     debug: bool
     snoop: bool
+    remove: bool
   BtmResult {.pure, size: sizeof(uint8).} = enum
     Ok = 0x00'u8
     InternalError = 0x01'u8
@@ -144,9 +146,11 @@ proc newBtmServer(opt: AppOptions): BtmServer =
   new result
   result.debugBtm = opt.debug
   result.enableSnoop = opt.snoop
-  let sock = newSocket()
+  if opt.remove:
+    discard tryRemoveFile(opt.path)
+  let sock = newSocket(Domain.AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   sock.setSockOpt(OptReuseAddr, true)
-  sock.bindAddr(opt.port, "localhost")
+  sock.bindUnix(opt.path)
   sock.listen()
   result.serverSock = sock
   lock.initLock()
@@ -234,17 +238,19 @@ proc run(self: BtmServer) =
 # ------------------------------------------------------------------------------
 proc parseOptions(): AppOptions =
   let p = newParser("btmd"):
-    argparse.option("-p", "--port", default = "5963", help = "bind port")
+    argparse.option("-p", "--path", default = "/tmp/btmd.sock", help = "bind path")
+    argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
     argparse.flag("-s", "--snoop", help = "enable snoop")
   let opts = p.parse()
   if opts.help:
     quit(0)
   try:
-    result.port = opts.port.parseInt.Port
+    result.path = opts.path
   except:
     echo &"!!! invalid port"
     quit(1)
+  result.remove = opts.removeIfExists
   result.debug = opts.debug
   result.snoop = opts.snoop
 
@@ -268,6 +274,7 @@ proc main(): int =
         syslog.error(line)
     else:
       syslog.info(err)
+  removeFile(opts.path)
 
 when isMainModule:
   quit main()

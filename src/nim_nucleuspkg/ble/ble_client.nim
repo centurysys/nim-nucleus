@@ -1,6 +1,7 @@
 import std/asyncdispatch
 import std/asyncnet
 import std/deques
+import std/nativesockets
 import std/options
 import std/strformat
 import std/strutils
@@ -332,7 +333,7 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   result.gattMbx = newMailbox[string](8)
   result.lck = newAsyncLock()
   result.debug = debug
-  result.sock = newAsyncSocket()
+  result.sock = newAsyncSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   asyncCheck result.responseHandler()
   asyncCheck result.taskSender()
   asyncCheck result.taskDummy()
@@ -340,11 +341,9 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
 # ------------------------------------------------------------------------------
 # Initialize
 # ------------------------------------------------------------------------------
-proc initBTM*(self: BleClient): Future[bool] {.async.} =
+proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
   try:
-    echo "* initBTM(), connecting..."
-    await self.sock.connect("localhost", Port(5963))
-    echo " -> connected."
+    await self.sock.connectUnix(path)
     result = true
   except:
     echo "initBTM exception."
