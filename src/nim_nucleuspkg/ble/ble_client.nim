@@ -1,6 +1,7 @@
 import std/asyncdispatch
 import std/asyncnet
 import std/deques
+import std/nativesockets
 import std/options
 import std/strformat
 import std/strutils
@@ -70,6 +71,7 @@ type
     encrypted: bool
     encryptionWait: AsyncLock
     connected: bool
+    debug: bool
   GattClient* = ref GattClientObj
 
 # ------------------------------------------------------------------------------
@@ -332,7 +334,7 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   result.gattMbx = newMailbox[string](8)
   result.lck = newAsyncLock()
   result.debug = debug
-  result.sock = newAsyncSocket()
+  result.sock = newAsyncSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   asyncCheck result.responseHandler()
   asyncCheck result.taskSender()
   asyncCheck result.taskDummy()
@@ -340,14 +342,14 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
 # ------------------------------------------------------------------------------
 # Initialize
 # ------------------------------------------------------------------------------
-proc initBTM*(self: BleClient): Future[bool] {.async.} =
+proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
   try:
-    echo "* initBTM(), connecting..."
-    await self.sock.connect("localhost", Port(5963))
-    echo " -> connected."
+    await self.sock.connectUnix(path)
     result = true
   except:
-    echo "initBTM exception."
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! initBTM: caught exception, \"{err}\"."
+    syslog.error(errmsg)
     result = false
 
 # ------------------------------------------------------------------------------
@@ -458,6 +460,18 @@ proc handleGattDisconnection*(self: BleClient, gattId: uint16):
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isConnected*(self: GattClient): bool {.inline.} =
+  result = self.connected
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isDebugEnabled*(self: GattClient): bool {.inline.} =
+  result = self.debug
+
+# ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
 proc waitConfirm*(self: GattClient, timeout = 0): Future[Result[GattConfirm, ErrorCode]]
@@ -513,8 +527,9 @@ proc gattHandleExchangeMtuEvent*(self: GattClient, payload: string) =
     return
   let peerAddr = self.peer.address.bdAddr2string()
   let mtu = event.gattExchangeMtuData.serverMtu
-  let logmsg = &"* MTU changed: peer {peerAddr}, {mtu} [bytes]"
-  syslog.info(logmsg)
+  if self.isDebugEnabled:
+    let logmsg = &"* MTU changed: peer {peerAddr}, {mtu} [bytes]"
+    syslog.info(logmsg)
   self.mtu = mtu
 
 # ------------------------------------------------------------------------------
@@ -618,12 +633,6 @@ proc waitEncryptionComplete*(self: GattClient): Future[Result[bool, ErrorCode]]
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc isConnected*(self: GattClient): bool =
-  result = self.connected
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
 proc newGattMailboxes(self: BleClient, gattId: uint16): GattMailboxes =
   new result
   result.gattId = gattID
@@ -650,6 +659,7 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   client.encryptionWait = newAsyncLock()
   client.mailboxes = gattMailboxes
   client.connected = true
+  client.debug = self.debug
   result = some(client)
 
 # ------------------------------------------------------------------------------

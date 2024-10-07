@@ -33,6 +33,7 @@ type
     waiting: bool
   BleNimObj = object
     ble: BleClient
+    path: string
     mode: SecurityMode
     iocap: IoCap
     running: bool
@@ -243,6 +244,9 @@ proc eventHandler(self: BleNim) {.async.} =
       # LE Encryption Change 通知
       let data = notify.leEncryptionChangeData
       await self.handleEncryptionChange(data)
+    of GapReadRemoteUsedFeatures:
+      # LE Read Remote Used Features 通知
+      discard
     of GapDisconnectionComplete:
       # LE Disconnection Complete 通知
       let data = notify.leDisconData
@@ -263,7 +267,7 @@ proc init*(self: BleNim): Future[bool] {.async.} =
   ## BleNim 内部で使用している NetNucleus の初期化を行う。
   if self.running:
     return true
-  result = await self.ble.initBTM()
+  result = await self.ble.initBTM(self.path)
   if result:
     if not await self.ble.setSecurityModeReq(self.mode):
       syslog.error("! Setup SecurityMode failed.")
@@ -278,11 +282,13 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(debug = false, debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
-    iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
+proc newBleNim*(path: string = socketPath, debug = false, debug_stack = false,
+    mode: SecurityMode = SecurityMode.Level2, iocap: IoCap = IoCap.NoInputNoOutput,
+    initialize = false): BleNim =
   ## BleNim インスタンスの初期化
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
+  res.path = path
   res.mode = mode
   res.iocap = iocap
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
@@ -805,7 +811,7 @@ when isMainModule:
     echo "done."
 
   proc asyncMain() {.async.} =
-    let ble = newBleNim(debug = true, debug_stack = false,
+    let ble = newBleNim(path = "/tmp/btm", debug = true, debug_stack = false,
         mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return

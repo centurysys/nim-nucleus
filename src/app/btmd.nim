@@ -1,6 +1,7 @@
 import std/locks
 import std/net
 import std/options
+import std/os
 import std/posix
 import std/strformat
 import std/times
@@ -9,6 +10,7 @@ import results
 import ../nim_nucleuspkg/ble/btm
 import ../nim_nucleuspkg/ble/util
 import ../nim_nucleuspkg/ble/core/opc
+import ../nim_nucleuspkg/ble/common/app_parameters
 import ../nim_nucleuspkg/lib/syslog
 
 type
@@ -22,9 +24,10 @@ type
     clientSock: Socket
   BtmServer = ref BtmServerObj
   AppOptions = object
-    port: Port
+    path: string
     debug: bool
     snoop: bool
+    remove: bool
   BtmResult {.pure, size: sizeof(uint8).} = enum
     Ok = 0x00'u8
     InternalError = 0x01'u8
@@ -66,7 +69,7 @@ proc sig_handler(signum: cint) {.noconv.} =
       "SIGTERM"
     else:
       $signum
-  raise newException(SignalException, &"\n{SigExceptionStr}, {$sig}.")
+  raise newException(SignalException, &"{SigExceptionStr}, {$sig}.")
 
 # ------------------------------------------------------------------------------
 #
@@ -144,9 +147,11 @@ proc newBtmServer(opt: AppOptions): BtmServer =
   new result
   result.debugBtm = opt.debug
   result.enableSnoop = opt.snoop
-  let sock = newSocket()
+  if opt.remove:
+    discard tryRemoveFile(opt.path)
+  let sock = newSocket(Domain.AF_UNIX, SOCK_STREAM, IPPROTO_IP)
   sock.setSockOpt(OptReuseAddr, true)
-  sock.bindAddr(opt.port, "localhost")
+  sock.bindUnix(opt.path)
   sock.listen()
   result.serverSock = sock
   lock.initLock()
@@ -161,7 +166,7 @@ proc initBtm(self: BtmServer): bool =
   if not self.callbackInitialized:
     let res = setCallback(cmdCallback)
     if not res:
-      let errmsg = &"! BleClient::init set callback failed with {res}."
+      let errmsg = &"! set callback failed with {res}."
       syslog.error(errmsg)
       return
     if self.debugBtm:
@@ -171,12 +176,12 @@ proc initBtm(self: BtmServer): bool =
     self.callbackInitialized = true
   let res = btmStart(BtmMode.Normal)
   if not res:
-    let errmsg = &"! BleClient::init start BTM failed with {res}."
+    let errmsg = &"! start BTM failed with {res}."
     syslog.error(errmsg)
     return
-  echo "Wait for BTM initialized..."
+  syslog.info("Wait for BTM initialized...")
   lock.acquire()
-  echo &"BTM initialized, BD ADDRESS: {bdAddrStr}"
+  syslog.info(&"BTM initialized, BD ADDRESS: {bdAddrStr}")
   self.btmStarted = true
   registerSignalHandler(SIGINT, sig_handler)
   result = true
@@ -213,9 +218,11 @@ proc handleClientRecv(self: BtmServer) =
 proc waitClient(self: BtmServer) =
   var sock: Socket
   self.serverSock.accept(sock)
+  syslog.info("client application connected.")
   self.clientSock = sock
   sock_opt = some(sock)
   self.handleClientRecv()
+  syslog.info("client application disconnected.")
   self.clientSock = nil
   sock_opt = none(Socket)
   sock.close()
@@ -224,27 +231,33 @@ proc waitClient(self: BtmServer) =
 #
 # ------------------------------------------------------------------------------
 proc run(self: BtmServer) =
-  discard self.initBtm()
   while true:
+    discard self.initBtm()
     self.waitClient()
-    #discard self.deInitBtm()
+    let res = self.deInitBtm()
+    if not res:
+      let logmsg = "failed to finalize BTM."
+      syslog.error(logmsg)
+    sleep(1000)
 
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
 proc parseOptions(): AppOptions =
   let p = newParser("btmd"):
-    argparse.option("-p", "--port", default = "5963", help = "bind port")
+    argparse.option("-p", "--path", default = socketPath, help = "bind path")
+    argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
     argparse.flag("-s", "--snoop", help = "enable snoop")
   let opts = p.parse()
   if opts.help:
     quit(0)
   try:
-    result.port = opts.port.parseInt.Port
+    result.path = opts.path
   except:
     echo &"!!! invalid port"
     quit(1)
+  result.remove = opts.removeIfExists
   result.debug = opts.debug
   result.snoop = opts.snoop
 
@@ -268,6 +281,10 @@ proc main(): int =
         syslog.error(line)
     else:
       syslog.info(err)
+  discard btmStart(BtmMode.Shutdown)
+  removeFile(opts.path)
+
 
 when isMainModule:
+  openlog("btmd")
   quit main()

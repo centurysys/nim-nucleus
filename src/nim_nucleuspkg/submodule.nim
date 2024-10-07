@@ -13,6 +13,7 @@ import ./lib/[
   mailbox,
   syslog
 ]
+import ble/common/app_parameters
 import results
 export
   ble_client,
@@ -22,6 +23,7 @@ export
   ble_sm,
   notifications,
   util,
+  app_parameters,
   asyncsync,
   errcode,
   mailbox,
