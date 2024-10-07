@@ -69,7 +69,7 @@ proc sig_handler(signum: cint) {.noconv.} =
       "SIGTERM"
     else:
       $signum
-  raise newException(SignalException, &"\n{SigExceptionStr}, {$sig}.")
+  raise newException(SignalException, &"{SigExceptionStr}, {$sig}.")
 
 # ------------------------------------------------------------------------------
 #
@@ -166,7 +166,7 @@ proc initBtm(self: BtmServer): bool =
   if not self.callbackInitialized:
     let res = setCallback(cmdCallback)
     if not res:
-      let errmsg = &"! BleClient::init set callback failed with {res}."
+      let errmsg = &"! set callback failed with {res}."
       syslog.error(errmsg)
       return
     if self.debugBtm:
@@ -176,12 +176,12 @@ proc initBtm(self: BtmServer): bool =
     self.callbackInitialized = true
   let res = btmStart(BtmMode.Normal)
   if not res:
-    let errmsg = &"! BleClient::init start BTM failed with {res}."
+    let errmsg = &"! start BTM failed with {res}."
     syslog.error(errmsg)
     return
-  echo "Wait for BTM initialized..."
+  syslog.info("Wait for BTM initialized...")
   lock.acquire()
-  echo &"BTM initialized, BD ADDRESS: {bdAddrStr}"
+  syslog.info(&"BTM initialized, BD ADDRESS: {bdAddrStr}")
   self.btmStarted = true
   registerSignalHandler(SIGINT, sig_handler)
   result = true
@@ -218,9 +218,11 @@ proc handleClientRecv(self: BtmServer) =
 proc waitClient(self: BtmServer) =
   var sock: Socket
   self.serverSock.accept(sock)
+  syslog.info("client application connected.")
   self.clientSock = sock
   sock_opt = some(sock)
   self.handleClientRecv()
+  syslog.info("client application disconnected.")
   self.clientSock = nil
   sock_opt = none(Socket)
   sock.close()
@@ -229,10 +231,14 @@ proc waitClient(self: BtmServer) =
 #
 # ------------------------------------------------------------------------------
 proc run(self: BtmServer) =
-  discard self.initBtm()
   while true:
+    discard self.initBtm()
     self.waitClient()
-    #discard self.deInitBtm()
+    let res = self.deInitBtm()
+    if not res:
+      let logmsg = "failed to finalize BTM."
+      syslog.error(logmsg)
+    sleep(1000)
 
 # ------------------------------------------------------------------------------
 #
@@ -275,7 +281,10 @@ proc main(): int =
         syslog.error(line)
     else:
       syslog.info(err)
+  discard btmStart(BtmMode.Shutdown)
   removeFile(opts.path)
 
+
 when isMainModule:
+  openlog("btmd")
   quit main()

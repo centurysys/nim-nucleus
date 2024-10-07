@@ -347,7 +347,9 @@ proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
     await self.sock.connectUnix(path)
     result = true
   except:
-    echo "initBTM exception."
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! initBTM: caught exception, \"{err}\"."
+    syslog.error(errmsg)
     result = false
 
 # ------------------------------------------------------------------------------
@@ -627,12 +629,6 @@ proc waitEncryptionComplete*(self: GattClient): Future[Result[bool, ErrorCode]]
     result = err(ErrorCode.Disconnected)
   else:
     result = ok(true)
-
-# ------------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------------
-proc isConnected*(self: GattClient): bool =
-  result = self.connected
 
 # ------------------------------------------------------------------------------
 #

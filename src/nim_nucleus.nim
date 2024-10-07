@@ -244,6 +244,9 @@ proc eventHandler(self: BleNim) {.async.} =
       # LE Encryption Change 通知
       let data = notify.leEncryptionChangeData
       await self.handleEncryptionChange(data)
+    of GapReadRemoteUsedFeatures:
+      # LE Read Remote Used Features 通知
+      discard
     of GapDisconnectionComplete:
       # LE Disconnection Complete 通知
       let data = notify.leDisconData
