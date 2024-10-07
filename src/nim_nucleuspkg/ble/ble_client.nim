@@ -71,6 +71,7 @@ type
     encrypted: bool
     encryptionWait: AsyncLock
     connected: bool
+    debug: bool
   GattClient* = ref GattClientObj
 
 # ------------------------------------------------------------------------------
@@ -457,6 +458,18 @@ proc handleGattDisconnection*(self: BleClient, gattId: uint16):
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isConnected*(self: GattClient): bool {.inline.} =
+  result = self.connected
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isDebugEnabled*(self: GattClient): bool {.inline.} =
+  result = self.debug
+
+# ------------------------------------------------------------------------------
 # API:
 # ------------------------------------------------------------------------------
 proc waitConfirm*(self: GattClient, timeout = 0): Future[Result[GattConfirm, ErrorCode]]
@@ -512,8 +525,9 @@ proc gattHandleExchangeMtuEvent*(self: GattClient, payload: string) =
     return
   let peerAddr = self.peer.address.bdAddr2string()
   let mtu = event.gattExchangeMtuData.serverMtu
-  let logmsg = &"* MTU changed: peer {peerAddr}, {mtu} [bytes]"
-  syslog.info(logmsg)
+  if self.isDebugEnabled:
+    let logmsg = &"* MTU changed: peer {peerAddr}, {mtu} [bytes]"
+    syslog.info(logmsg)
   self.mtu = mtu
 
 # ------------------------------------------------------------------------------
@@ -649,6 +663,7 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   client.encryptionWait = newAsyncLock()
   client.mailboxes = gattMailboxes
   client.connected = true
+  client.debug = self.debug
   result = some(client)
 
 # ------------------------------------------------------------------------------
