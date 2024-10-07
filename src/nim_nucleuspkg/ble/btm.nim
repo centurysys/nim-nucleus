@@ -51,7 +51,7 @@ type
     BtLogoTest = BTM_MODE_BT_LOGO_TEST.int
 
 var
-  cmdCallbackFunc: proc(buf: string)
+  cmdCallbackFunc: proc(buf: cstring, buflen: int)
   logCallbackFunc: proc(buf: string)
 
 # ------------------------------------------------------------------------------
@@ -60,9 +60,7 @@ var
 proc btmCallback(dl: cint, df: ptr uint8) {.cdecl.} =
   if cmdCallbackFunc.isNil:
     return
-  var buf = newString(dl.int)
-  copyMem(addr buf[0], df, dl)
-  cmdCallbackFunc(buf)
+  cmdCallbackFunc(cast[cstring](df), dl.int)
 
 # ------------------------------------------------------------------------------
 # BTM Callback (debug log)
@@ -93,7 +91,7 @@ proc btmStart*(mode: BtmMode): bool =
 # ------------------------------------------------------------------------------
 # API: コマンドコールバック関数登録
 # ------------------------------------------------------------------------------
-proc setCallback*(fn: proc(buf: string)): bool =
+proc setCallback*(fn: proc(buf: cstring, buflen: int)): bool =
   let res = BTM_SetCallback(btmCallback)
   if res == BTM_OK:
     cmdCallbackFunc = fn
