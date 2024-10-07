@@ -10,6 +10,7 @@ import results
 import ../nim_nucleuspkg/ble/btm
 import ../nim_nucleuspkg/ble/util
 import ../nim_nucleuspkg/ble/core/opc
+import ../nim_nucleuspkg/ble/common/app_parameters
 import ../nim_nucleuspkg/lib/syslog
 
 type
@@ -238,7 +239,7 @@ proc run(self: BtmServer) =
 # ------------------------------------------------------------------------------
 proc parseOptions(): AppOptions =
   let p = newParser("btmd"):
-    argparse.option("-p", "--path", default = "/tmp/btmd.sock", help = "bind path")
+    argparse.option("-p", "--path", default = socketPath, help = "bind path")
     argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
     argparse.flag("-s", "--snoop", help = "enable snoop")

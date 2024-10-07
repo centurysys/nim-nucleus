@@ -279,7 +279,7 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(path: string, debug = false, debug_stack = false,
+proc newBleNim*(path: string = socketPath, debug = false, debug_stack = false,
     mode: SecurityMode = SecurityMode.Level2, iocap: IoCap = IoCap.NoInputNoOutput,
     initialize = false): BleNim =
   ## BleNim インスタンスの初期化
