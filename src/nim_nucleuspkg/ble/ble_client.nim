@@ -176,7 +176,6 @@ proc waitAppEvent*(self: BleClient, events: seq[uint16], timeout: int = 0,
     oneshot = false): Future[Result[string, ErrorCode]] {.async.} =
   if events.len > 0:
     self.waitingEvents = events
-    debugEcho(&"==== waitAppEvents: events.len: {events.len}...")
     result = await self.appEventMbx.get(timeout)
   if events.len == 0 or oneshot:
     self.waitingEvents.setLen(0)
