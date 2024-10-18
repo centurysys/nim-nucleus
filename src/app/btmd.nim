@@ -230,10 +230,26 @@ proc waitClient(self: BtmServer) =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc rotateSnoopLog(self: BtmServer) =
+  let nowDt = now().format("yyyyMMdd'_'HHmmss")
+  let filename = &"/tmp/btsnoop_{nowDt}.log"
+  try:
+    moveFile("/tmp/btsnoop_hci0.log", filename)
+    let logmsg = &"rename btsnoop logfile to {filename}."
+    syslog.info(logmsg)
+  except:
+    let err = getCurrentExceptionMsg()
+    syslog.error(&"! rotateSnoopLog: caught exception, \"{err}\"")
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc run(self: BtmServer) =
   while true:
     discard self.initBtm()
     self.waitClient()
+    if self.enableSnoop:
+      self.rotateSnoopLog()
     let res = self.deInitBtm()
     if not res:
       let logmsg = "failed to finalize BTM."
