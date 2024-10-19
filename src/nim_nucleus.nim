@@ -305,8 +305,9 @@ proc newBleNim*(path: string = socketPath, debug = false, debug_stack = false,
 # ------------------------------------------------------------------------------
 # API: Start/Stop Scanning
 # ------------------------------------------------------------------------------
-proc startStopScan*(self: BleNim, active: bool, enable: bool, filterDuplicates = true):
-    Future[bool] {.async.} =
+proc startStopScan*(self: BleNim, active: bool, enable: bool,
+    scanInterval: uint16 = 0x00a0, scanWindow: uint16 = 0x30,
+    filterDuplicates = true): Future[bool] {.async.} =
   ## Scan の有効・無効を設定する。
   const procName = "startStopScan"
   if enable == self.scan.enable:
@@ -317,8 +318,8 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, filterDuplicates =
     return
   if enable:
     let scanType = if active: ScanType.Active else: ScanType.Passive
-    if not await self.ble.setScanParametersReq(scanType, ownAddrType = AddrType.Public,
-        ownRandomAddrType = RandomAddrType.Static):
+    if not await self.ble.setScanParametersReq(scanType, scanInterval, scanWindow,
+        ownAddrType = AddrType.Public, ownRandomAddrType = RandomAddrType.Static):
       syslog.error(&"! {procName}: setup scan parameters failed.")
       return
     self.devices.clear()
@@ -738,7 +739,7 @@ when isMainModule:
 
   proc handleGatt(self: Gatt) {.async.} =
     asyncCheck self.notificationHandler()
-    when false:
+    when true:
       echo "*** Wait for Encryption complete..."
       let enc_res = await self.waitEncryptionComplete()
       if enc_res.isOk:
@@ -811,7 +812,7 @@ when isMainModule:
     echo "done."
 
   proc asyncMain() {.async.} =
-    let ble = newBleNim(path = "/tmp/btm", debug = true, debug_stack = false,
+    let ble = newBleNim(debug = true, debug_stack = false,
         mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return
