@@ -91,6 +91,12 @@ proc debugEcho*(self: BleClient, msg: string, header = true) =
     debugEcho(msg, header)
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc debugEnabled*(self: BleClient): bool =
+  result = self.debug
+
+# ------------------------------------------------------------------------------
 # Put to Response Mailbox
 # ------------------------------------------------------------------------------
 proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
@@ -333,17 +339,38 @@ proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   result.gattMbx = newMailbox[string](8)
   result.lck = newAsyncLock()
   result.debug = debug
-  result.sock = newAsyncSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
-  asyncCheck result.responseHandler()
-  asyncCheck result.taskSender()
-  asyncCheck result.taskDummy()
 
 # ------------------------------------------------------------------------------
-# Initialize
+#
+# ------------------------------------------------------------------------------
+proc initTasks(self: BleClient) {.async.} =
+  asyncCheck self.responseHandler()
+  asyncCheck self.taskSender()
+  asyncCheck self.taskDummy()
+
+# ------------------------------------------------------------------------------
+# Initialize (UNIX Domain Socket)
 # ------------------------------------------------------------------------------
 proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
   try:
+    self.sock = newAsyncSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
     await self.sock.connectUnix(path)
+    await self.initTasks()
+    result = true
+  except:
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! initBTM: caught exception, \"{err}\"."
+    syslog.error(errmsg)
+    result = false
+
+# ------------------------------------------------------------------------------
+# Initialize (TCP)
+# ------------------------------------------------------------------------------
+proc initBTM*(self: BleClient, port: Port): Future[bool] {.async.} =
+  try:
+    self.sock = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_IP)
+    await self.sock.connect("localhost", port)
+    await self.initTasks()
     result = true
   except:
     let err = getCurrentExceptionMsg()

@@ -34,6 +34,7 @@ type
   BleNimObj = object
     ble: BleClient
     path: string
+    port: Option[Port]
     mode: SecurityMode
     iocap: IoCap
     running: bool
@@ -267,7 +268,10 @@ proc init*(self: BleNim): Future[bool] {.async.} =
   ## BleNim 内部で使用している NetNucleus の初期化を行う。
   if self.running:
     return true
-  result = await self.ble.initBTM(self.path)
+  if self.port.isSome:
+    result = await self.ble.initBTM(self.port.get)
+  else:
+    result = await self.ble.initBTM(self.path)
   if result:
     if not await self.ble.setSecurityModeReq(self.mode):
       syslog.error("! Setup SecurityMode failed.")
@@ -282,13 +286,15 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(path: string = socketPath, debug = false, debug_stack = false,
-    mode: SecurityMode = SecurityMode.Level2, iocap: IoCap = IoCap.NoInputNoOutput,
-    initialize = false): BleNim =
+proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
+    debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
+    iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
   ## BleNim インスタンスの初期化
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
   res.path = path
+  if port > 0:
+    res.port = some(port.Port)
   res.mode = mode
   res.iocap = iocap
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
