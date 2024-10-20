@@ -539,6 +539,8 @@ proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
   if not self.connected:
     syslog.error("! gattSend: GATT Disconnected.")
     return err(ErrorCode.Disconnected)
+  await self.bleClient.lck.acquire()
+  defer: self.bleClient.lck.release()
   let put_res = await self.gattMbx.put(payload)
   if put_res.isErr:
     if put_res.error == ErrorCode.Disconnected:
