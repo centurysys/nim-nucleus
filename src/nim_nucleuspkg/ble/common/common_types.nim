@@ -9,6 +9,7 @@ type
   PeerAddr* = object
     addrType*: AddrType
     address*: uint64
+    stringValue*: string
   LocalAddr* = object
     addrType*: AddrType
     address*: uint64

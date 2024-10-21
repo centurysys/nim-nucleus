@@ -3,6 +3,7 @@ import std/options
 import std/strformat
 import std/tables
 import results
+import pretty
 import ./ble_client
 import ./notifications
 import ./core/opc
@@ -160,7 +161,8 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
       continue
     let msg = msg_opt.get()
     if self.debugEnabled:
-      debugEcho(&" {procName}: msg: {msg}")
+      debugEcho(&" {procName}: received msg:")
+      print msg
     case msg.event:
     of GapConnectionComplete:
       # LE Connection Complete 通知
