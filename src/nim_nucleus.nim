@@ -309,14 +309,53 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
   result = res
 
 # ==============================================================================
-# Scanner
+# GAP (Scanner)
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# API: Get White List Size
+# ------------------------------------------------------------------------------
+proc getWhiteListSize*(self: BleNim): Future[int] {.async.} =
+  result = await self.ble.readWhiteListSizeReq()
+
+# ------------------------------------------------------------------------------
+# API: Clear White List
+# ------------------------------------------------------------------------------
+proc clearWhiteList*(self: BleNim): Future[bool] {.async.} =
+  result = await self.ble.clearWhiteListReq()
+
+# ------------------------------------------------------------------------------
+# API: Add Device to White List
+# ------------------------------------------------------------------------------
+proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string, random = false):
+    Future[bool] {.async.} =
+  let addrType = if random: AddrType.Random else: AddrType.Public
+  let bdAddr_opt = deviceAddr.string2bdAddr()
+  if bdAddr_opt.isNone:
+    return
+  let bdAddr = bdAddr_opt.get()
+  let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
+  result = await self.ble.addDeviceToWhiteListReq(peer)
+
+# ------------------------------------------------------------------------------
+# API: Remove Device from White List
+# ------------------------------------------------------------------------------
+proc removeDeviceFromWhiteList*(self: BleNim, deviceAddr: string, random = false):
+    Future[bool] {.async.} =
+  let addrType = if random: AddrType.Random else: AddrType.Public
+  let bdAddr_opt = deviceAddr.string2bdAddr()
+  if bdAddr_opt.isNone:
+    return
+  let bdAddr = bdAddr_opt.get()
+  let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
+  result = await self.ble.removeDeviceFromWhiteListReq(peer)
 
 # ------------------------------------------------------------------------------
 # API: Start/Stop Scanning
 # ------------------------------------------------------------------------------
 proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint16 = 0,
-    scanWindow: uint16 = 0, filterDuplicates = true): Future[bool] {.async.} =
+    scanWindow: uint16 = 0, filterDuplicates = true,
+    filterPolicy = ScanFilterPolicy.AcceptAllExceptDirected): Future[bool] {.async.} =
   ## Scan の有効・無効を設定する。
   const
     procName = "startStopScan"
@@ -342,7 +381,8 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
       let scanType = if active: ScanType.Active else: ScanType.Passive
       if not await self.ble.setScanParametersReq(scanType, paramScanInterval,
           paramScanWindow, ownAddrType = AddrType.Public,
-          ownRandomAddrType = RandomAddrType.Static):
+          ownRandomAddrType = RandomAddrType.Static,
+          filterPolicy = filterPolicy):
         syslog.error(&"! {procName}: setup scan parameters failed.")
         return
       self.scan.interval = paramScanInterval
@@ -883,15 +923,25 @@ when isMainModule:
     echo "done."
 
   proc asyncMain() {.async.} =
+    const ua651Addr = "64:33:DB:86:5D:04"
     let ble = newBleNim(debug = true, debug_stack = false,
         mode = SecurityMode.Level2, iocap = IoCap.NoInputNoOutput)
     if not await ble.init():
       return
+    let whiteListSize = await ble.getWhiteListSize()
+    echo &"* White List Size: {whiteListSize}."
+    block:
+      let res = await ble.clearWhiteList()
+      echo &"* Clear White List -> result: {res}"
+    block:
+      let res = await ble.addDeviceToWhiteList(ua651Addr, false)
+      echo &"* Add {ua651Addr} to White List -> result: {res}"
     if fileExists(KeysFile):
       let content = KeysFile.readFile().parseJson()
       let res = await ble.setAllRemoteCollectionKeys(content)
       echo &"*** restore AllKeys -> result: {res}"
-    if not await ble.startStopScan(active = true, enable = true):
+    if not await ble.startStopScan(active = true, enable = true,
+        filterPolicy = ScanFilterPolicy.WhitelistOnly):
       echo "failed to start scannning!"
       return
     echo "* wait for scanning..."
