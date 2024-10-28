@@ -7,3 +7,4 @@ type
     GattError = (5, "GATT Error")
     ParseError = (6, "Parse Error")
     ValueError = (7, "Invalid Value")
+    DeviceNotFound = (8, "Device Not Found")

@@ -19,6 +19,8 @@ type
     active: bool
     enable: bool
     filter: bool
+    interval: uint16
+    window: uint16
   BleDeviceObj* = object
     peer*: PeerAddr
     peerAddrStr*: string
@@ -311,11 +313,13 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
 # ------------------------------------------------------------------------------
 # API: Start/Stop Scanning
 # ------------------------------------------------------------------------------
-proc startStopScan*(self: BleNim, active: bool, enable: bool,
-    scanInterval: uint16 = 0x00a0, scanWindow: uint16 = 0x30,
-    filterDuplicates = true): Future[bool] {.async.} =
+proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint16 = 0,
+    scanWindow: uint16 = 0, filterDuplicates = true): Future[bool] {.async.} =
   ## Scan の有効・無効を設定する。
-  const procName = "startStopScan"
+  const
+    procName = "startStopScan"
+    defaultInterval: uint16 = 0x00a0
+    defaultWindow: uint16 = 0x0030
   if enable == self.scan.enable:
     if active != self.scan.active:
       syslog.error(&"! {procName}: Another type of scan is already in progress.")
@@ -323,17 +327,30 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool,
       result = true
     return
   if enable:
-    let scanType = if active: ScanType.Active else: ScanType.Passive
-    if not await self.ble.setScanParametersReq(scanType, scanInterval, scanWindow,
-        ownAddrType = AddrType.Public, ownRandomAddrType = RandomAddrType.Static):
-      syslog.error(&"! {procName}: setup scan parameters failed.")
-      return
+    var needSetup = true
+    if scanInterval == 0 and scanWindow == 0:
+      if self.scan.interval > 0 and self.scan.window > 0:
+        # 以前設定された値を変更しない
+        needSetup = false
+    if needSetup:
+      let paramScanInterval = if scanInterval > 0: scanInterval
+          else: defaultInterval
+      let paramScanWindow = if scanWindow > 0: scanWindow
+          else: defaultWindow
+      let scanType = if active: ScanType.Active else: ScanType.Passive
+      if not await self.ble.setScanParametersReq(scanType, paramScanInterval,
+          paramScanWindow, ownAddrType = AddrType.Public,
+          ownRandomAddrType = RandomAddrType.Static):
+        syslog.error(&"! {procName}: setup scan parameters failed.")
+        return
+      self.scan.interval = paramScanInterval
+      self.scan.window = paramScanWindow
+      self.scan.active = active
     self.devices.clear()
     result = await self.ble.setScanEnableReq(scanEnable = true, filterDuplicates)
     if not result:
       syslog.error(&"! {procName}: enable scannning failed.")
       return
-    self.scan.active = active
     self.scan.enable = true
     self.scan.filter = filterDuplicates
   else:
@@ -378,7 +395,7 @@ proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
 # ------------------------------------------------------------------------------
 # API: Wait device
 # ------------------------------------------------------------------------------
-proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
+proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout: int = 0):
     Future[Result[BleDevice, ErrorCode]] {.async.} =
   ## 指定したデバイスのアドバタイジングを受信するまで待機する。
   proc calcWait(endTime: float): int =
@@ -396,6 +413,9 @@ proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout = 0):
       discard self.waiter.fut_device.read()
       self.waiter.fut_device = nil
   # not found
+  if timeout < 0:
+    return err(DeviceNotFound)
+
   let startTime = now().toTime.toUnixFloat()
   let endTime = startTime + timeout.float / 1000.0
   self.waiter.waiting = true
@@ -516,9 +536,26 @@ type
 # ------------------------------------------------------------------------------
 proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
     Future[Result[Gatt, ErrorCode]] {.async.} =
+  proc restartScan(self: BleNim) {.async.} =
+    discard await self.startStopScan(active = self.scan.active, enable = true,
+        filterDuplicates = self.scan.filter)
+
+  var needScanRestart = false
+  if self.tblGatt.len > 0 and self.scan.enable:
+    # BT85x 制限
+    # Centralとして接続中 && Scan中 && 接続開始側 の状態の組合せをサポートしない
+    # -> Scan を停止する
+    if not await self.startStopScan(active = self.scan.active, enable = false,
+        filterDuplicates = self.scan.filter):
+      let errmsg = "! connect: failed to stop scanning."
+      syslog.error(errmsg)
+      return
+    needScanRestart = true
   let client_res = await self.ble.gattConnect(connParams, timeout = timeout)
   if client_res.isErr:
     discard await self.ble.gattCommonConnectCancelIns()
+    if needScanRestart:
+      await self.restartScan()
     return err(client_res.error)
   let res = new Gatt
   res.gatt = client_res.get()
@@ -527,6 +564,8 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   res.ble = self
   self.tblGatt[res.peer] = res
   result = ok(res)
+  if needScanRestart:
+    await self.restartScan()
 
 # ------------------------------------------------------------------------------
 # API: Connection
