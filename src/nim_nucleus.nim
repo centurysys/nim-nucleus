@@ -41,6 +41,7 @@ type
     iocap: IoCap
     running: bool
     scan: ScanState
+    scanLock: AsyncLock
     eventQueue: AsyncQueue[string]
     devices: Table[PeerAddr, BleDevice]
     bondedKeys: Table[PeerAddr, RemoteCollectionKeys]
@@ -301,6 +302,7 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
   res.iocap = iocap
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
   res.waiter.waiting = false
+  res.scanLock = newAsyncLock()
   if initialize:
     if not waitFor res.init():
       return
@@ -356,6 +358,28 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
   else:
     result = await self.ble.setScanEnableReq(scanEnable = false, self.scan.filter)
     self.scan.enable = false
+
+# ------------------------------------------------------------------------------
+# API: Restart Scanning
+# ------------------------------------------------------------------------------
+proc restartScan*(self: BleNim): Future[bool] {.async.} =
+  const procName = "restartScan"
+  if not self.scan.enable:
+    syslog.error(&"! {procName}: Scan not started.")
+    return
+  await self.scanLock.acquire()
+  defer: self.scanLock.release()
+  if not await self.startStopScan(active = self.scan.active, enable = false,
+      filterDuplicates = self.scan.filter):
+    let errmsg = &"! {procName}: failed to stop scanning."
+    syslog.error(errmsg)
+    return
+  await sleepAsync(50)
+  result = await self.startStopScan(active = self.scan.active, enable = true,
+      filterDuplicates = self.scan.filter)
+  if not result:
+    let errmsg = &"! {procName}: failed to re-start scanning."
+    syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
 # API: Get All devices
@@ -541,6 +565,8 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
         filterDuplicates = self.scan.filter)
 
   var needScanRestart = false
+  await self.scanLock.acquire()
+  defer: self.scanLock.release()
   if self.tblGatt.len > 0 and self.scan.enable:
     # BT85x 制限
     # Centralとして接続中 && Scan中 && 接続開始側 の状態の組合せをサポートしない
