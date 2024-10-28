@@ -25,6 +25,7 @@ type
   BtmServer = ref BtmServerObj
   AppOptions = object
     path: string
+    port: Option[Port]
     debug: bool
     snoop: bool
     remove: bool
@@ -149,9 +150,15 @@ proc newBtmServer(opt: AppOptions): BtmServer =
   result.enableSnoop = opt.snoop
   if opt.remove:
     discard tryRemoveFile(opt.path)
-  let sock = newSocket(Domain.AF_UNIX, SOCK_STREAM, IPPROTO_IP)
-  sock.setSockOpt(OptReuseAddr, true)
-  sock.bindUnix(opt.path)
+  var sock: Socket
+  if opt.port.isNone:
+    sock = newSocket(Domain.AF_UNIX, SOCK_STREAM, IPPROTO_IP)
+    sock.setSockOpt(OptReuseAddr, true)
+    sock.bindUnix(opt.path)
+  else:
+    sock = newSocket(Domain.AF_INET, SOCK_STREAM, IPPROTO_IP)
+    sock.setSockOpt(OptReuseAddr, true)
+    sock.bindAddr(opt.port.get, "localhost")
   sock.listen()
   result.serverSock = sock
   lock.initLock()
@@ -262,6 +269,7 @@ proc run(self: BtmServer) =
 proc parseOptions(): AppOptions =
   let p = newParser("btmd"):
     argparse.option("-p", "--path", default = socketPath, help = "bind path")
+    argparse.option("-P", "--port", help = "bind port (localhost)")
     argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
     argparse.flag("-s", "--snoop", help = "enable snoop")
@@ -271,8 +279,14 @@ proc parseOptions(): AppOptions =
   try:
     result.path = opts.path
   except:
-    echo &"!!! invalid port"
+    echo &"!!! invalid path"
     quit(1)
+  if opts.port.len > 0:
+    try:
+      let port = opts.port.parseInt.Port
+      result.port = some(port)
+    except:
+      echo &"!!! invalid port, use UNIX domain socket."
   result.remove = opts.removeIfExists
   result.debug = opts.debug
   result.snoop = opts.snoop

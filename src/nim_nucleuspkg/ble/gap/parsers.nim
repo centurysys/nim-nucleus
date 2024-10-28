@@ -42,6 +42,7 @@ proc parseAdvertisingReport*(payload: string): Option[AdvertisingReport] =
     res.eventType = payload.getU8(2).EventType
     res.peer.addrType = payload.getU8(3).AddrType
     res.peer.address = payload.getBdAddr(4)
+    res.peer.stringValue = res.peer.address.bdAddr2string()
     let dataLen = payload.getU8(10).int
     if dataLen > 0:
       res.rawdata = newString(dataLen)
@@ -70,6 +71,7 @@ proc parseConnectionComplete*(payload: string): Option[ConnectionCompleteEvent] 
     res.role = payload.getU8(5).Role
     res.peer.addrType = payload.getU8(6).AddrType
     res.peer.address = payload.getBdAddr(7)
+    res.peer.stringValue = res.peer.address.bdAddr2string()
     res.conInterval = payload.getLe16(13)
     res.conLatency = payload.getLe16(15)
     res.supervisionTimeout = payload.getLe16(17)
@@ -168,6 +170,7 @@ proc parseEnhConnectionComplete*(payload: string): Option[EnhConnectionCompleteE
     res.role = payload.getU8(5).Role
     res.peer.addrType = payload.getU8(6).AddrType
     res.peer.address = payload.getBdAddr(7)
+    res.peer.stringValue = res.peer.address.bdAddr2string()
     res.localPrivateAddr = payload.getBdAddr(13)
     res.remotePrivateAddr = payload.getBdAddr(19)
     res.conInterval = payload.getLe16(25)

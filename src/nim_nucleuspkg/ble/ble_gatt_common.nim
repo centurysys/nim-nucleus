@@ -3,6 +3,7 @@ import std/options
 import std/strformat
 import std/tables
 import results
+import pretty
 import ./ble_client
 import ./notifications
 import ./core/opc
@@ -20,7 +21,7 @@ export errcode, types, requests
 # Send Instruction/Receive Confirmation
 # ------------------------------------------------------------------------------
 proc btmInstruction(self: BleClient, procName: string, payload: string,
-    expectedOpc: uint16): Future[Result[int16, ErrorCode]] {.async.} =
+    expectedOpc: uint16, debug = false): Future[Result[int16, ErrorCode]] {.async.} =
   let response_res = await self.btmSendRecv(payload)
   if response_res.isErr:
     let errmsg = &"! {procName}: failed"
@@ -28,6 +29,9 @@ proc btmInstruction(self: BleClient, procName: string, payload: string,
     return err(response_res.error)
   let response = response_res.get()
   let resOpc = response.getOpc(0)
+  if self.debugEnabled and debug:
+    self.debugEcho(&"* {procName}: response: {response.hexDump}")
+    self.debugEcho(&"* {procName}: response OPC: 0x{resOpc:02x}")
   if resOpc != expectedOpc:
     let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
     syslog.error(errmsg)
@@ -64,7 +68,12 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
   setLe16(buf, 21, connparam.supervisionTimeout)
   setLe16(buf, 23, connparam.minCeLength)
   setLe16(buf, 25, connparam.maxCeLength)
-  result = await self.btmInstruction(procName, buf.toString, expectedOpc)
+  let payload = buf.toString()
+  if self.debugEnabled:
+    self.debugEcho(&"* {procName}: send payload: {payload.hexDump}")
+    discard
+  result = await self.btmInstruction(procName, payload, expectedOpc,
+      self.debugEnabled)
 
 # ------------------------------------------------------------------------------
 # 1.4.5 GATT 切断指示
@@ -144,10 +153,16 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
         discard await self.gattCommonConnectCancelIns()
         result = err(ErrorCode.Timeouted)
         break
-    let msg_opt = payload_res.get.parseEvent()
+    let payload = payload_res.get()
+    if self.debugEnabled:
+      debugEcho(&" {procName}: received payload: {payload.hexDump()}")
+    let msg_opt = payload.parseEvent()
     if msg_opt.isNone:
       continue
     let msg = msg_opt.get()
+    if self.debugEnabled:
+      debugEcho(&" {procName}: received msg:")
+      print msg
     case msg.event:
     of GapConnectionComplete:
       # LE Connection Complete 通知
@@ -158,6 +173,9 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
       if gattResult == 0:
         gattId = some(msg.gattConData.common.gattId)
       else:
+        if self.debugEnabled:
+          let s = gattResultToString(gattResult, true)
+          self.debugEcho(&"! {procName}: {s}")
         logGattResult(procName, gattResult, detail = true)
         result = err(ErrorCode.GattError)
         break

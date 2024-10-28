@@ -32,6 +32,7 @@ proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
     res.attMtu = payload.getLe16(6)
     res.peer.addrType = payload.getU8(8).AddrType
     res.peer.address = payload.getBdAddr(9)
+    res.peer.stringValue = res.peer.address.bdAddr2string()
     res.controlRole = payload.getU8(15).Role
     result = some(res)
   except:
@@ -257,6 +258,7 @@ proc parseGattHandleValuesEvent*(payload: string): Option[GattHandleValue] =
     res.common = payload.parseGattEventCommon()
     res.peer.addrType = payload.getU8(6).AddrType
     res.peer.address = payload.getBdAddr(7)
+    res.peer.stringValue = res.peer.address.bdAddr2string()
     res.handle = payload.getLe16(13)
     let valueLen = payload.getLeInt16(15)
     if valueLen > 0:
