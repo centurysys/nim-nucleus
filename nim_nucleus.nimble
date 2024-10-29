@@ -13,7 +13,7 @@ skipDirs      = @["app"]
 
 # Dependencies
 
-requires "nim >= 2.0.10"
+requires "nim >= 2.2.0"
 requires "results >= 0.5.0"
 requires "argparse == 0.10.1"
 requires "pretty >= 0.1.0"
