@@ -333,14 +333,11 @@ proc clearWhiteList*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # API: Add Device to White List
 # ------------------------------------------------------------------------------
-proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string, random = false):
-    Future[bool] {.async.} =
-  let addrType = if random: AddrType.Random else: AddrType.Public
-  let bdAddr_opt = deviceAddr.string2bdAddr()
-  if bdAddr_opt.isNone:
+proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string): Future[bool] {.async.} =
+  let peer_opt = deviceAddr.toBdAddr()
+  if peer_opt.isNone:
     return
-  let bdAddr = bdAddr_opt.get()
-  let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
+  let peer = peer_opt.get()
   result = await self.ble.addDeviceToWhiteListReq(peer)
   if result:
     self.scan.whiteList.incl(peer)
@@ -348,14 +345,11 @@ proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string, random = false):
 # ------------------------------------------------------------------------------
 # API: Remove Device from White List
 # ------------------------------------------------------------------------------
-proc removeDeviceFromWhiteList*(self: BleNim, deviceAddr: string, random = false):
-    Future[bool] {.async.} =
-  let addrType = if random: AddrType.Random else: AddrType.Public
-  let bdAddr_opt = deviceAddr.string2bdAddr()
-  if bdAddr_opt.isNone:
+proc removeDeviceFromWhiteList*(self: BleNim, deviceAddr: string): Future[bool] {.async.} =
+  let peer_opt = deviceAddr.toBdAddr()
+  if peer_opt.isNone:
     return
-  let bdAddr = bdAddr_opt.get()
-  let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
+  let peer = peer_opt.get()
   result = await self.ble.removeDeviceFromWhiteListReq(peer)
   if result:
     self.scan.whiteList.excl(peer)
@@ -955,7 +949,7 @@ when isMainModule:
       let res = await ble.clearWhiteList()
       echo &"* Clear White List -> result: {res}"
     for i in 0..1:
-      let res = await ble.addDeviceToWhiteList(ua651Addr, false)
+      let res = await ble.addDeviceToWhiteList(ua651Addr)
       echo &"* [{i}] Add {ua651Addr} to White List -> result: {res}"
     if fileExists(KeysFile):
       let content = KeysFile.readFile().parseJson()
@@ -974,7 +968,7 @@ when isMainModule:
       scanStopped = false
     for retry in 0 ..< 30:
       echo &"[{retry + 1}] waiting..."
-      let dev_res = await ble.waitDevice(devices = @["64:33:DB:86:5D:04"],
+      let dev_res = await ble.waitDevice(devices = @[ua651Addr],
         timeout = 1000)
       if dev_res.isErr:
         continue

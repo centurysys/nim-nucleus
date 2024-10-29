@@ -228,13 +228,35 @@ proc string2bdAddr*(x: string): Option[uint64] =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc toBdAddr*(x: string, random: bool = false): Option[PeerAddr] =
+proc isRandomAddr*(bdAddrInt: uint64): bool =
+  const randomAddrBase = "80:00:00:00:00:00".string2bdAddr.get()
+  if bdAddrInt >= randomAddrBase:
+    result = true
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc isRandomAddr*(x: string): Option[bool] =
+  let bdAddrInt_opt = x.string2bdAddr()
+  if bdAddrInt_opt.isNone:
+    return
+  let bdAddrInt = bdAddrInt_opt.get()
+  let isRandom = bdAddrInt.isRandomAddr()
+  result = some(isRandom)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc toBdAddr*(x: string): Option[PeerAddr] =
   let address_opt = x.string2bdAddr()
   if address_opt.isNone:
     return
   var res: PeerAddr
+  let bdAddress = address_opt.get()
+  let random = bdAddress.isRandomAddr()
   res.addrType = if random: AddrType.Random else: AddrType.Public
   res.address = address_opt.get()
+  res.stringValue = x
   result = some(res)
 
 # ------------------------------------------------------------------------------
