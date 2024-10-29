@@ -3,6 +3,7 @@ import std/enumutils
 import std/json
 import std/options
 import std/sequtils
+import std/sets
 import std/strformat
 import std/strutils
 import std/tables
@@ -10,7 +11,7 @@ import std/times
 import results
 import nim_nucleuspkg/submodule
 export results, asyncsync, mailbox
-export SecurityMode, IoCap, PeerAddr
+export SecurityMode, IoCap, PeerAddr, ScanFilterPolicy
 export HandleValue, ErrorCode
 export util
 
@@ -21,6 +22,8 @@ type
     filter: bool
     interval: uint16
     window: uint16
+    filterPolicy: ScanFilterPolicy
+    whiteList: HashSet[PeerAddr]
   BleDeviceObj* = object
     peer*: PeerAddr
     peerAddrStr*: string
@@ -303,6 +306,7 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
   res.waiter.waiting = false
   res.scanLock = newAsyncLock()
+  res.scan.whiteList = initHashSet[PeerAddr]()
   if initialize:
     if not waitFor res.init():
       return
@@ -323,6 +327,8 @@ proc getWhiteListSize*(self: BleNim): Future[int] {.async.} =
 # ------------------------------------------------------------------------------
 proc clearWhiteList*(self: BleNim): Future[bool] {.async.} =
   result = await self.ble.clearWhiteListReq()
+  if result:
+    self.scan.whiteList.clear()
 
 # ------------------------------------------------------------------------------
 # API: Add Device to White List
@@ -336,6 +342,8 @@ proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string, random = false):
   let bdAddr = bdAddr_opt.get()
   let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
   result = await self.ble.addDeviceToWhiteListReq(peer)
+  if result:
+    self.scan.whiteList.incl(peer)
 
 # ------------------------------------------------------------------------------
 # API: Remove Device from White List
@@ -349,6 +357,15 @@ proc removeDeviceFromWhiteList*(self: BleNim, deviceAddr: string, random = false
   let bdAddr = bdAddr_opt.get()
   let peer = PeerAddr(addrType: addrType, address: bdAddr, stringValue: deviceAddr)
   result = await self.ble.removeDeviceFromWhiteListReq(peer)
+  if result:
+    self.scan.whiteList.excl(peer)
+
+# ------------------------------------------------------------------------------
+# API: Get Device in White List
+# ------------------------------------------------------------------------------
+iterator devicesInWhiteList*(self: BleNim): PeerAddr =
+  for device in self.scan.whiteList.items:
+    yield device
 
 # ------------------------------------------------------------------------------
 # API: Start/Stop Scanning
@@ -370,13 +387,16 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
   if enable:
     var needSetup = true
     if scanInterval == 0 and scanWindow == 0:
-      if self.scan.interval > 0 and self.scan.window > 0:
+      if self.scan.interval > 0 and self.scan.window > 0 and
+          filterPolicy == self.scan.filterPolicy:
         # 以前設定された値を変更しない
         needSetup = false
     if needSetup:
       let paramScanInterval = if scanInterval > 0: scanInterval
+          elif self.scan.interval > 0: self.scan.interval
           else: defaultInterval
       let paramScanWindow = if scanWindow > 0: scanWindow
+          elif self.scan.window > 0: self.scan.window
           else: defaultWindow
       let scanType = if active: ScanType.Active else: ScanType.Passive
       if not await self.ble.setScanParametersReq(scanType, paramScanInterval,
@@ -388,6 +408,7 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
       self.scan.interval = paramScanInterval
       self.scan.window = paramScanWindow
       self.scan.active = active
+      self.scan.filterPolicy = filterPolicy
     self.devices.clear()
     result = await self.ble.setScanEnableReq(scanEnable = true, filterDuplicates)
     if not result:
@@ -410,13 +431,13 @@ proc restartScan*(self: BleNim): Future[bool] {.async.} =
   await self.scanLock.acquire()
   defer: self.scanLock.release()
   if not await self.startStopScan(active = self.scan.active, enable = false,
-      filterDuplicates = self.scan.filter):
+      filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy):
     let errmsg = &"! {procName}: failed to stop scanning."
     syslog.error(errmsg)
     return
   await sleepAsync(50)
   result = await self.startStopScan(active = self.scan.active, enable = true,
-      filterDuplicates = self.scan.filter)
+      filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy)
   if not result:
     let errmsg = &"! {procName}: failed to re-start scanning."
     syslog.error(errmsg)
@@ -933,9 +954,9 @@ when isMainModule:
     block:
       let res = await ble.clearWhiteList()
       echo &"* Clear White List -> result: {res}"
-    block:
+    for i in 0..1:
       let res = await ble.addDeviceToWhiteList(ua651Addr, false)
-      echo &"* Add {ua651Addr} to White List -> result: {res}"
+      echo &"* [{i}] Add {ua651Addr} to White List -> result: {res}"
     if fileExists(KeysFile):
       let content = KeysFile.readFile().parseJson()
       let res = await ble.setAllRemoteCollectionKeys(content)
