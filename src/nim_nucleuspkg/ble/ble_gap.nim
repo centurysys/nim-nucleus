@@ -48,6 +48,62 @@ proc setScanEnableReq*(self: BleClient, scanEnable: bool, filterDuplicates: bool
       else: DuplicateFilter.Disable).uint8
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
+# ------------------------------------------------------------------------------
+# 1.2.20 LE Read White List Size 要求
+# ------------------------------------------------------------------------------
+proc readWhiteListSizeReq*(self: BleClient): Future[int] {.async.} =
+  const
+    procName = "readWhiteListSizeReq"
+    reqOpc = BTM_D_OPC_BLE_GAP_READ_WHITE_LIST_SIZE_REQ
+    expOpc = BTM_D_OPC_BLE_GAP_READ_WHITE_LIST_SIZE_RSP
+  var buf: array[2, uint8]
+  buf.setOpc(0, reqOpc)
+  let res = await self.btmRequestResponse(procName, buf.toString, expOpc)
+  if res.result and res.payload.len == 1:
+    let size = res.payload.getU8(0)
+    result = size.int
+
+# ------------------------------------------------------------------------------
+# 1.2.22 LE Clear White List 要求
+# ------------------------------------------------------------------------------
+proc clearWhiteListReq*(self: BleClient): Future[bool] {.async.} =
+  const
+    procName = "clearWhiteListSizeReq"
+    reqOpc = BTM_D_OPC_BLE_GAP_CLEAR_WHITE_LIST_REQ
+    expOpc = BTM_D_OPC_BLE_GAP_CLEAR_WHITE_LIST_RSP
+  var buf: array[2, uint8]
+  buf.setOpc(0, reqOpc)
+  result = await self.btmRequest(procName, buf.toString, expOpc)
+
+# ------------------------------------------------------------------------------
+# 1.2.24 LE Add Device To White List 要求
+# ------------------------------------------------------------------------------
+proc addDeviceToWhiteListReq*(self: BleClient, peer: PeerAddr): Future[bool] {.async.} =
+  const
+    procName = "addDeviceToWhiteListSizeReq"
+    reqOpc = BTM_D_OPC_BLE_GAP_ADD_DEVICE_TO_WHITE_LIST_REQ
+    expOpc = BTM_D_OPC_BLE_GAP_ADD_DEVICE_TO_WHITE_LIST_RSP
+  var buf: array[9, uint8]
+  buf.setOpc(0, reqOpc)
+  buf[2] = peer.addrType.uint8
+  buf.setBdAddr(3, peer.address)
+  debugEcho(hexDump(buf.toString))
+  result = await self.btmRequest(procName, buf.toString, expOpc)
+
+# ------------------------------------------------------------------------------
+# 1.2.26 LE Remove Device From White List 要求
+# ------------------------------------------------------------------------------
+proc removeDeviceFromWhiteListReq*(self: BleClient, peer: PeerAddr): Future[bool] {.async.} =
+  const
+    procName = "removeDeviceFromWhiteListSizeReq"
+    reqOpc = BTM_D_OPC_BLE_GAP_REMOVE_DEVICE_FROM_WHITE_LIST_REQ
+    expOpc = BTM_D_OPC_BLE_GAP_REMOVE_DEVICE_FROM_WHITE_LIST_RSP
+  var buf: array[9, uint8]
+  buf.setOpc(0, reqOpc)
+  buf[2] = peer.addrType.uint8
+  buf.setBdAddr(3, peer.address)
+  result = await self.btmRequest(procName, buf.toString, expOpc)
+
 # ==============================================================================
 # Instructs
 # ==============================================================================

@@ -430,6 +430,30 @@ proc btmRequest*(self: BleClient, procName: string, payload: string,
   result = hciCode.checkHciStatus(procName)
 
 # ------------------------------------------------------------------------------
+# API: Send Request/Receive, Check Response, Return Pesponse
+# ------------------------------------------------------------------------------
+proc btmRequestResponse*(self: BleClient, procName: string, payload: string,
+    expectedOpc: uint16, timeout = 0): Future[tuple[result: bool, payload: string]] {.async.} =
+  let payload_res = await self.btmSendRecv(payload, timeout)
+  if payload_res.isErr:
+    let err = payload_res.error
+    let errmsg = &"! {procName}: failed, {err}"
+    syslog.error(errmsg)
+    return
+  let response = payload_res.get()
+  let resOpc = response.getOpc(0)
+  if resOpc != expectedOpc:
+    let errmsg = &"! {procName}: response OPC is mismatch, 0x{resOpc:04x}"
+    syslog.error(errmsg)
+    return
+  debugEcho(hexDump(response))
+  let hciCode = response.getu8(2)
+  self.debugEcho(&"* {procName}: hciCode: {hciCode}")
+  let res = hciCode.checkHciStatus(procName)
+  result.result = res
+  result.payload = response[3..response.high]
+
+# ------------------------------------------------------------------------------
 # API: Handle Encryption Change
 # ------------------------------------------------------------------------------
 proc handleEncryptionChange*(self: BleClient, conHandle: uint16, enable: bool):
