@@ -114,6 +114,10 @@ proc handleResponseWhenUnconnected(buf: string) =
       bdAddrStr = evt.bdAddrStr
       btmInitialized = true
       lock.release()
+  of BTM_D_OPC_MNG_REQ_ERR_EVT:
+    let errType = buf.getU8(2)
+    syslog.error(&"! Error detected, ERR type: 0x{errType:02x}.")
+    lock.release()
   else:
     echo &"! handleResponseWhenUnconnected: {buf.len} bytes discarded, {hexDump(buf)}"
 
@@ -188,6 +192,10 @@ proc initBtm(self: BtmServer): bool =
     return
   syslog.info("Wait for BTM initialized...")
   lock.acquire()
+  if not btmInitialized:
+    syslog.error("BTM initialize failed.")
+    self.serverSock.close()
+    quit(1)
   syslog.info(&"BTM initialized, BD ADDRESS: {bdAddrStr}")
   self.btmStarted = true
   registerSignalHandler(SIGINT, sig_handler)
