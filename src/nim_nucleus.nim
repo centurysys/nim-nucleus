@@ -29,6 +29,7 @@ type
     peerAddrStr*: string
     name*: Option[string]
     rssi*: int8
+    advertiseData*: string
     seenTime*: Time
     keys: RemoteCollectionKeys
   BleDevice* = ref BleDeviceObj
@@ -105,6 +106,7 @@ proc advertisingHandler(self: BleNim) {.async.} =
     device.peerAddrStr = bdAddr2string(report.peer.address)
     device.name = report.name
     device.rssi = report.rssi
+    device.advertiseData = report.rawdata
     device.seenTime = now().toTime
     self.devices[report.peer] = device
     if self.waiter.waiting and (not self.waiter.waitDeviceQueue.full):
