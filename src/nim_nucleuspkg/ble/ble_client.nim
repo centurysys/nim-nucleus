@@ -37,11 +37,11 @@ type
   GattEvent = ref GattEventObj
   GattMailboxesObj* = object
     gattId*: uint16
-    gattRespMbx: Mailbox[GattConfirm]
-    gattEventMbx: Mailbox[GattEvent]
-    gattNotifyMbx: Mailbox[GattHandleValue]
+    gattRespMbx*: Mailbox[GattConfirm]
+    gattEventMbx*: Mailbox[GattEvent]
+    gattNotifyMbx*: Mailbox[GattHandleValue]
   GattMailboxes* = ref GattMailboxesObj
-  GattMailboxesPtr* = ptr GattMailboxes
+  #GattMailboxesPtr* = ptr GattMailboxes
   BleClientObj = object
     debug: bool
     running: bool

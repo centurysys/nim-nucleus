@@ -95,10 +95,11 @@ proc putNoWait*[T](self: Mailbox[T], data: T): Result[bool, ErrorCode] =
 #
 # ------------------------------------------------------------------------------
 proc close*[T](self: Mailbox[T]) =
-  self.closed = true
-  if not self.fut.isNil:
-    let err = new IOError
-    self.fut.fail(err)
+  if not self.closed:
+    if not self.fut.isNil:
+      let err = new IOError
+      self.fut.fail(err)
+    self.closed = true
 
 # ------------------------------------------------------------------------------
 #

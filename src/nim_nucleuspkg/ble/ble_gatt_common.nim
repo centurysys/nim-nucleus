@@ -198,4 +198,7 @@ proc disconnect*(self: GattClient): Future[bool] {.async.} =
   let response_res = await self.bleClient.gattCommonDisconnectIns(gattId)
   if response_res.isErr:
     return
+  let eventMbx = self.mailboxes.gattEventMbx
+  if not eventMbx.isNil:
+    eventMbx.close()
   result = self.bleClient.deregister(self)
