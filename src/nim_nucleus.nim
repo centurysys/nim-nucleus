@@ -699,6 +699,12 @@ proc isConnected*(self: Gatt): bool =
   result = self.connected
 
 # ------------------------------------------------------------------------------
+# API:
+# ------------------------------------------------------------------------------
+proc bdAddress*(self: Gatt): string =
+  result = self.peer.stringValue
+
+# ------------------------------------------------------------------------------
 # API: Wait Encryption Complete
 # ------------------------------------------------------------------------------
 proc waitEncryptionComplete*(self: Gatt): Future[Result[bool, ErrorCode]] {.async.} =
