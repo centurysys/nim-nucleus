@@ -1,5 +1,6 @@
 import std/options
 import std/strformat
+import std/strutils
 import ./types
 import ../util
 import ../../lib/syslog
@@ -33,12 +34,19 @@ proc parseGattCommonConnectEvent*(payload: string): Option[GattConEvent] =
     res.peer.addrType = payload.getU8(8).AddrType
     res.peer.address = payload.getBdAddr(9)
     res.peer.stringValue = res.peer.address.bdAddr2string()
-    res.controlRole = payload.getU8(15).Role
+    try:
+      {.warning[HoleEnumConv]:off.}
+      res.controlRole = payload.getU8(15).Role
+    except:
+      res.controlRole = Role.Error
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"
     syslog.error(errmsg)
+    let dumpStr = payload.hexDump()
+    for line in dumpStr.splitLines:
+      syslog.error(line)
 
 # ------------------------------------------------------------------------------
 # 1.4.7 GATT 切断通知

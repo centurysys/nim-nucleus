@@ -65,6 +65,7 @@ type
   Role* {.pure.} = enum
     Central = 0x00'u8
     Peripheral = 0x01'u8
+    Error = 0xff'u8
   ClockAccuracy* = enum
     acc500ppm = (0x00'u8, "500ppm")
     acc250ppm = (0x01'u8, "250ppm")

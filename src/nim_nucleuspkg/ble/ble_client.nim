@@ -528,7 +528,7 @@ proc waitConfirm*(self: GattClient, timeout = 0): Future[Result[GattConfirm, Err
     {.async.} =
   try:
     let mbx = self.mailboxes.gattRespMbx
-    if not self.connected:
+    if mbx.isNil or (not self.connected) or mbx.isClosed:
       result = err(ErrorCode.Disconnected)
     else:
       result = await mbx.get(timeout)
@@ -542,7 +542,7 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[Result[GattEvent, ErrorCo
     {.async.} =
   try:
     let mbx = self.mailboxes.gattEventMbx
-    if not self.connected:
+    if mbx.isNil or (not self.connected) or mbx.isClosed:
       result = err(ErrorCode.Disconnected)
     else:
       result = await mbx.get(timeout)
@@ -556,7 +556,7 @@ proc waitNotify*(self: GattClient, timeout = 0): Future[Result[GattHandleValue, 
     {.async.} =
   try:
     let mbx = self.mailboxes.gattNotifyMbx
-    if not self.connected:
+    if mbx.isNil or (not self.connected) or mbx.isClosed:
       result = err(ErrorCode.Disconnected)
     else:
       result = await mbx.get(timeout)

@@ -87,7 +87,6 @@ proc addDeviceToWhiteListReq*(self: BleClient, peer: PeerAddr): Future[bool] {.a
   buf.setOpc(0, reqOpc)
   buf[2] = peer.addrType.uint8
   buf.setBdAddr(3, peer.address)
-  debugEcho(hexDump(buf.toString))
   result = await self.btmRequest(procName, buf.toString, expOpc)
 
 # ------------------------------------------------------------------------------

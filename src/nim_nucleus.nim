@@ -65,6 +65,9 @@ type
     Notify = 0x0001
     Indicate = 0x0002
 
+const
+  ModName = "BleNim"
+
 # ==============================================================================
 # Utility
 # ==============================================================================
@@ -340,6 +343,8 @@ proc addDeviceToWhiteList*(self: BleNim, deviceAddr: string): Future[bool] {.asy
   if peer_opt.isNone:
     return
   let peer = peer_opt.get()
+  if self.scan.whiteList.contains(peer):
+    return true
   result = await self.ble.addDeviceToWhiteListReq(peer)
   if result:
     self.scan.whiteList.incl(peer)
@@ -352,6 +357,8 @@ proc removeDeviceFromWhiteList*(self: BleNim, deviceAddr: string): Future[bool] 
   if peer_opt.isNone:
     return
   let peer = peer_opt.get()
+  if not self.scan.whiteList.contains(peer):
+    return true
   result = await self.ble.removeDeviceFromWhiteListReq(peer)
   if result:
     self.scan.whiteList.excl(peer)
@@ -617,9 +624,11 @@ type
 # ------------------------------------------------------------------------------
 proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
     Future[Result[Gatt, ErrorCode]] {.async.} =
+  const ProcName = &"{ModName}::connect"
   proc restartScan(self: BleNim) {.async.} =
     discard await self.startStopScan(active = self.scan.active, enable = true,
-        filterDuplicates = self.scan.filter)
+        filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy)
+    syslog.info(&"* {ProcName}: restartScan: scan restarted.")
 
   var needScanRestart = false
   await self.scanLock.acquire()
@@ -628,9 +637,10 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
     # BT85x 制限
     # Centralとして接続中 && Scan中 && 接続開始側 の状態の組合せをサポートしない
     # -> Scan を停止する
+    syslog.info(&"* {ProcName}: pause scanning.")
     if not await self.startStopScan(active = self.scan.active, enable = false,
-        filterDuplicates = self.scan.filter):
-      let errmsg = "! connect: failed to stop scanning."
+        filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy):
+      let errmsg = &"! {ProcName}: failed to stop scanning."
       syslog.error(errmsg)
       return
     needScanRestart = true

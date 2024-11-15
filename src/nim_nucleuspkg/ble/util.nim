@@ -212,6 +212,8 @@ proc setUuid*(buf: var openArray[uint8|char], pos: int, uuid: Uuid) =
 #
 # ------------------------------------------------------------------------------
 proc string2bdAddr*(x: string): Option[uint64] =
+  if x.len == 0:
+    return
   var address: uint64
   try:
     let buf = x.split(":").mapIt(it.parseHexInt)
