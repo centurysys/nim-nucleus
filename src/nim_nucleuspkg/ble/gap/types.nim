@@ -84,6 +84,7 @@ type
     peer*: PeerAddr
     rawdata*: string
     name*: Option[string]
+    manufacturerData*: Option[string]
     flags*: Option[uint8]
     data*: Table[uint8, string]
     rssi*: int8

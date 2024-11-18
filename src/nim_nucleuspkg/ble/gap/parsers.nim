@@ -26,6 +26,10 @@ proc parseAdvertisingData(self: var AdvertisingReport, payload: string) =
       let name = payload.getLeArray(pos + 2, len - 1)
       if name.len > 0:
         self.name = some(name.toString)
+    of AdType.ManufacturerSpecific.uint8:
+      let data = payload.getLeArray(pos + 2, len - 1)
+      if data.len > 0:
+        self.manufacturerData = some(data.toString)
     else:
       discard
     pos.inc(len + 1)
