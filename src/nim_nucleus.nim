@@ -30,6 +30,7 @@ type
     name*: Option[string]
     rssi*: int8
     advertiseData*: string
+    manufacturerData*: Option[string]
     seenTime*: Time
     keys: RemoteCollectionKeys
   BleDevice* = ref BleDeviceObj
@@ -110,6 +111,7 @@ proc advertisingHandler(self: BleNim) {.async.} =
     device.name = report.name
     device.rssi = report.rssi
     device.advertiseData = report.rawdata
+    device.manufacturerData = report.manufacturerData
     device.seenTime = now().toTime
     self.devices[report.peer] = device
     if self.waiter.waiting and (not self.waiter.waitDeviceQueue.full):
@@ -377,6 +379,7 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
     scanWindow: uint16 = 0, filterDuplicates = true,
     filterPolicy = ScanFilterPolicy.AcceptAllExceptDirected): Future[bool] {.async.} =
   ## Scan の有効・無効を設定する。
+  ## scanInterval, scanWindow 両方が 0 の場合、以前設定された値を変更しない。
   const
     procName = "startStopScan"
     defaultInterval: uint16 = 0x00a0
