@@ -217,6 +217,30 @@ proc handleGattDisconnection(self: BleNim, event: GattDisconEvent)
       gatt.connected = false
 
 # ------------------------------------------------------------------------------
+# GAP: LE Connection Complete 通知 (中断時)
+# ------------------------------------------------------------------------------
+proc handleConnectionComplete(self: BleNim, event: ConnectionCompleteEvent)
+    {.async.} =
+  discard
+
+# ------------------------------------------------------------------------------
+# GATT: 接続通知 (中断時)
+# ------------------------------------------------------------------------------
+proc handleGattConnection(self: BleNim, event: GattConEvent) {.async.} =
+  const ProcName = "handleGattConnection"
+  let gattResult = event.common.gattResult
+  let gattId = event.common.gattId
+  if gattResult == 0:
+    syslog.warning(&"* {ProcName}: gattId: {gattId} -> disconnect...")
+    let res = await self.ble.gattCommonDisconnectIns(gattId)
+    if res.isErr:
+      syslog.error(&"! {ProcName}: disconnect failed.")
+    else:
+      syslog.info(&"* {ProcName}: GATT disconnected.")
+  else:
+    logGattResult(ProcName, gattResult, detail = true)
+
+# ------------------------------------------------------------------------------
 # Handler: GAP/SM Events
 # ------------------------------------------------------------------------------
 proc eventHandler(self: BleNim) {.async.} =
@@ -269,6 +293,17 @@ proc eventHandler(self: BleNim) {.async.} =
       # GATT 切断通知 (0x40BB)
       let data = notify.gattDisconData
       await self.handleGattDisconnection(data)
+    of SmLtkSend, SmEdivRandSend, SmIrkSend, SmAddressInformationReceive,
+        SmAddressInformationSend, SmCsrkSend:
+      discard
+    of GapConnectionComplete:
+      # LE Connection Complete 通知 (GATT接続中断時)
+      let data = notify.leConData
+      await self.handleConnectionComplete(data)
+    of GattCmnConnect:
+      # GATT 接続通知 (GATT接続中断時)
+      let data = notify.gattConData
+      await self.handleGattConnection(data)
     else:
       let eventName = notify.event.symbolName
       let logmsg = &"* eventHandler: unhandled event: {eventName}"
