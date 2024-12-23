@@ -338,6 +338,19 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
     debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
     iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
   ## BleNim インスタンスの初期化
+  ## - path: btmd が listen している Unix Domain Socket PATH
+  ## - port: localhost の TCP 経由で通信する場合の btmd の listen port(0 以外の場合)
+  ## - mode: LE Sucurity Mode
+  ##   - SecurityMode.NoAuth: (No authentication and no encryption)
+  ##   - SecurityMode.Level2: (LE Security Mode 1 Level 2)
+  ##   - SecurityMode.Level4: (LE Security Mode 1 Level 4)
+  ## - iocap: ローカルデバイスの IO Capabilities
+  ##   - IoCap.DisplayOnly
+  ##   - IoCap.DisplayYesNo
+  ##   - IoCap.KeyboardOnly
+  ##   - IoCap.NoInputNoOutput: MA-S120/LB では実質的にこれのみ
+  ##   - IoCap.KeyboardDisplay
+  ## - initialize: 初期化処理(BleNim::init() も一緒に実行するかどうか)
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
   res.path = path
@@ -415,6 +428,16 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
     filterPolicy = ScanFilterPolicy.AcceptAllExceptDirected): Future[bool] {.async.} =
   ## Scan の有効・無効を設定する。
   ## scanInterval, scanWindow 両方が 0 の場合、以前設定された値を変更しない。
+  ## - active: Active Scan/Passive Scan
+  ## - enable: Scan 有効/無効
+  ## - scanInterval: Scan 間隔: 0x0004〜0x4000, 0.625ms単位、2.5ms〜10240ms
+  ## - scanWindow: 1回の Scan あたりの継続時間: 0x0004〜0x4000, 0.625ms単位、2.5ms〜10240ms
+  ## - filterDuplicates: Duplicate filtering 有効/無効 切り替え
+  ## - filterPolicy: Advertising Packet を受け付ける際のポリシー設定
+  ##   - ScanFilterPolicy.AcceptAllExceptDirected
+  ##   - ScanFilterPolicy.WhitelistOnly
+  ##   - ScanFilterPolicy.AcceptAllExceptNotDirected
+  ##   - ScanFilterPolicy.AcceptAllExceptWhitelistAndNotDirected
   const
     procName = "startStopScan"
     defaultInterval: uint16 = 0x00a0
@@ -524,6 +547,8 @@ proc findDeviceByAddr*(self: BleNim, peer: string): Option[BleDevice] =
 proc waitDevice*(self: BleNim, devices: seq[string] = @[], timeout: int = 0):
     Future[Result[BleDevice, ErrorCode]] {.async.} =
   ## 指定したデバイスのアドバタイジングを受信するまで待機する。
+  ## - devices: 対象デバイス指定、空の場合はデバイスを限定しない
+  ## - timeout: ms 単位で指定。0 の場合はタイムアウトしない。
   proc calcWait(endTime: float): int =
     let nowTs = now().toTime.toUnixFloat
     result = ((endTime - nowTs) * 1000.0 + 0.5).int
@@ -727,6 +752,7 @@ proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1
 # ------------------------------------------------------------------------------
 proc disconnect*(self: Gatt, unpair = false) {.async.} =
   ## 接続されている GATT 接続の切断を行う。
+  ## - unpair: 同時にペアリング情報の消去を行う。
   if self.gatt.isNil:
     let errmsg = "! Gatt::disconnect: already disconnected."
     syslog.error(errmsg)
@@ -750,6 +776,7 @@ proc isConnected*(self: Gatt): bool =
 # API:
 # ------------------------------------------------------------------------------
 proc bdAddress*(self: Gatt): string =
+  ## GATT 接続先の Bluetooth Address を取得する。
   result = self.peer.stringValue
 
 # ------------------------------------------------------------------------------

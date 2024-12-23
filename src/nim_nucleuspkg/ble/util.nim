@@ -250,6 +250,7 @@ proc isRandomAddr*(x: string): Option[bool] =
 #
 # ------------------------------------------------------------------------------
 proc toBdAddr*(x: string): Option[PeerAddr] =
+  ## 文字列で表現した Bluetooth Address から PeerAddr に変換
   let address_opt = x.string2bdAddr()
   if address_opt.isNone:
     return
