@@ -231,8 +231,8 @@ proc string2bdAddr*(x: string): Option[uint64] =
 #
 # ------------------------------------------------------------------------------
 proc isRandomAddr*(bdAddrInt: uint64): bool =
-  const randomAddrBase = "80:00:00:00:00:00".string2bdAddr.get()
-  if bdAddrInt >= randomAddrBase:
+  const ulBit = "02:00:00:00:00:00".string2bdAddr.get()
+  if (bdAddrInt and ulBit) != 0:
     result = true
 
 # ------------------------------------------------------------------------------
