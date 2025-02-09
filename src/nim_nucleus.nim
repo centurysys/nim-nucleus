@@ -696,7 +696,7 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   var needScanRestart = false
   await self.scanLock.acquire()
   defer: self.scanLock.release()
-  if self.tblGatt.len > 0 and self.scan.enable:
+  if self.scan.enable:
     # BT85x 制限
     # Centralとして接続中 && Scan中 && 接続開始側 の状態の組合せをサポートしない
     # -> Scan を停止する
