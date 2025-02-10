@@ -231,8 +231,8 @@ proc string2bdAddr*(x: string): Option[uint64] =
 #
 # ------------------------------------------------------------------------------
 proc isRandomAddr*(bdAddrInt: uint64): bool =
-  const ulBit = "02:00:00:00:00:00".string2bdAddr.get()
-  if (bdAddrInt and ulBit) != 0:
+  const RandomAddr = "C0:00:00:00:00:00".string2bdAddr.get()
+  if (bdAddrInt and RandomAddr) == RandomAddr:
     result = true
 
 # ------------------------------------------------------------------------------
@@ -281,3 +281,27 @@ when isMainModule:
   let s = "\x40\xb8\xfb\xff\x00\x00\x00\x00"
   let e = s.getLeInt16(2)
   echo e
+  let addresses = @[
+    "00:11:22:33:44:55", # Public Address
+    "C0:11:22:33:44:55", # Random Static Address
+    "FF:FF:FF:FF:FF:FF", # Random Address
+    "42:42:42:42:42:42", # Public Address
+    "88:99:AA:BB:CC:DD", # Public Address
+    "C1:23:45:67:89:AB", # Random Static Address
+    "FE:DC:BA:98:76:54", # Random Address
+    "invalid address",    # Invalid Address
+    "00-11-22-33-44-55", # Invalid Address format (delimiter is not ':')
+    "00:11:22:33:44",    # Invalid Address format (too short)
+    "00:11:22:33:44:GG" # Invalid Address format (invalid hex char)
+  ]
+
+  for address in addresses:
+    let isRandom_opt = address.isRandomAddr()
+    if isRandom_opt.isNone:
+      echo address, " is Invalid Address"
+    else:
+      let isRandom = isRandom_opt.get()
+      if isRandom:
+        echo address, " is Random Address"
+      else:
+        echo address, " is Public Address"
