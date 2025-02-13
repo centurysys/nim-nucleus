@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.9.1"
+version       = "0.9.2"
 author        = "Takeyoshi Kikuchi"
 description   = "Nim binding for NetNucleus BLE stack"
 license       = "MIT"

@@ -691,16 +691,14 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   proc restartScan(self: BleNim) {.async.} =
     discard await self.startStopScan(active = self.scan.active, enable = true,
         filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy)
-    syslog.info(&"* {ProcName}: restartScan: scan restarted.")
 
   var needScanRestart = false
   await self.scanLock.acquire()
   defer: self.scanLock.release()
-  if self.tblGatt.len > 0 and self.scan.enable:
+  if self.scan.enable:
     # BT85x 制限
     # Centralとして接続中 && Scan中 && 接続開始側 の状態の組合せをサポートしない
     # -> Scan を停止する
-    syslog.info(&"* {ProcName}: pause scanning.")
     if not await self.startStopScan(active = self.scan.active, enable = false,
         filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy):
       let errmsg = &"! {ProcName}: failed to stop scanning."
