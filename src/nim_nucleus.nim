@@ -718,8 +718,6 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   res.ble = self
   self.tblGatt[res.peer] = res
   result = ok(res)
-  if needScanRestart:
-    await self.restartScan()
 
 # ------------------------------------------------------------------------------
 # API: Connection
