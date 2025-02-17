@@ -489,17 +489,15 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
 # ------------------------------------------------------------------------------
 proc restartScan*(self: BleNim): Future[bool] {.async.} =
   const procName = "restartScan"
-  if not self.scan.enable:
-    syslog.error(&"! {procName}: Scan not started.")
-    return
   await self.scanLock.acquire()
   defer: self.scanLock.release()
-  if not await self.startStopScan(active = self.scan.active, enable = false,
-      filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy):
-    let errmsg = &"! {procName}: failed to stop scanning."
-    syslog.error(errmsg)
-    return
-  await sleepAsync(50)
+  if self.scan.enable:
+    if not await self.startStopScan(active = self.scan.active, enable = false,
+        filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy):
+      let errmsg = &"! {procName}: failed to stop scanning."
+      syslog.error(errmsg)
+      return
+    await sleepAsync(50)
   result = await self.startStopScan(active = self.scan.active, enable = true,
       filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy)
   if not result:
@@ -718,8 +716,6 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   res.ble = self
   self.tblGatt[res.peer] = res
   result = ok(res)
-  if needScanRestart:
-    await self.restartScan()
 
 # ------------------------------------------------------------------------------
 # API: Connection
