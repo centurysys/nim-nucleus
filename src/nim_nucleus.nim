@@ -716,11 +716,6 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   res.ble = self
   self.tblGatt[res.peer] = res
   result = ok(res)
-  if needScanRestart:
-    if self.scan.filterPolicy == ScanFilterPolicy.WhitelistOnly:
-      ## WhiteListOny で Scan している場合
-      ## 負荷が少ないので自動で Scan を再開する
-      await self.restartScan()
 
 # ------------------------------------------------------------------------------
 # API: Connection
