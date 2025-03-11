@@ -331,12 +331,12 @@ proc taskDummy(self: BleClient) {.async.} =
 # ------------------------------------------------------------------------------
 proc newBleClient*(debug: bool = false, debug_stack: bool = false): BleClient =
   new result
-  result.mainAdvMbx = newMailbox[string](10)
-  result.mainRespMbx = newMailbox[string](5)
-  result.mainEventMbx = newMailbox[string](5)
-  result.appEventMbx = newMailbox[string](5)
-  result.cmdMbx = newMailbox[string](8)
-  result.gattMbx = newMailbox[string](8)
+  result.mainAdvMbx = newMailbox[string](64)
+  result.mainRespMbx = newMailbox[string](32)
+  result.mainEventMbx = newMailbox[string](32)
+  result.appEventMbx = newMailbox[string](32)
+  result.cmdMbx = newMailbox[string](32)
+  result.gattMbx = newMailbox[string](32)
   result.lck = newAsyncLock()
   result.debug = debug
 

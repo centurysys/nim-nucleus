@@ -358,7 +358,7 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
     res.port = some(port.Port)
   res.mode = mode
   res.iocap = iocap
-  res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
+  res.waiter.waitDeviceQueue = newMailbox[BleDevice](32)
   res.waiter.waiting = false
   res.scanLock = newAsyncLock()
   res.scan.whiteList = initHashSet[PeerAddr]()
