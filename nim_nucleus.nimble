@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.9.4"
+version       = "0.9.5"
 author        = "Takeyoshi Kikuchi"
 description   = "Nim binding for NetNucleus BLE stack"
 license       = "MIT"
@@ -13,7 +13,7 @@ skipDirs      = @["app"]
 
 # Dependencies
 
-requires "nim >= 2.2.0"
+requires "nim >= 2.2.2"
 requires "results >= 0.5.0"
 requires "argparse == 0.10.1"
 requires "pretty >= 0.1.0"
