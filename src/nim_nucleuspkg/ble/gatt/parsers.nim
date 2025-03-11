@@ -212,6 +212,7 @@ proc parseGattReadUsingCharacteristicUuid*(payload: string):
     Option[GattReadUsingCharacteristicUuidEvent] =
   const procName = "parseGattReadUsingCharacteristicUuid"
   if not checkPayloadLen(procName, payload, 1030):
+    syslog.error(&"! {procName}: response payloadlen != 1030, {payload.len}.")
     return
   var res: GattReadUsingCharacteristicUuidEvent
   try:
@@ -227,6 +228,8 @@ proc parseGattReadUsingCharacteristicUuid*(payload: string):
         copyMem(addr res.values[i].value[0], addr payload[pos + 2], eachLen - 2)
         pos.inc(eachLen)
       result = some(res)
+    else:
+      syslog.error(&"! {procName}: nums == 0, payload.len = {payload.len}.")
   except:
     let err = getCurrentExceptionMsg()
     let errmsg = &"! {procName}: caught exception, {err}"

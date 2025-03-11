@@ -824,6 +824,7 @@ proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, Erro
     let handleValues = handleValues_res.get()
     result = ok(handleValues[0])
   else:
+    syslog.error(&"! readGattChar: failed with {handleValues_res.error}")
     result = err(handleValues_res.error)
 
 # ------------------------------------------------------------------------------

@@ -543,11 +543,15 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[Result[GattEvent, ErrorCo
   try:
     let mbx = self.mailboxes.gattEventMbx
     if mbx.isNil or (not self.connected) or mbx.isClosed:
+      syslog.error(&"! waitEvent: error, mbx.isNil? {mbx.isNil}," &
+          &"self.connected? {self.connected}, mbx.isClosed? {mbx.isClosed}.")
       result = err(ErrorCode.Disconnected)
     else:
       result = await mbx.get(timeout)
   except:
-    discard
+    let err = getCurrentExceptionMsg()
+    let errmsg = &"! waitEvent: caught exception, {err}."
+    syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------
 # API:
@@ -622,6 +626,7 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
   while true:
     let response_res = await self.waitEvent()
     if response_res.isErr:
+      syslog.error(&"! gattSendRecv: waitEvent() failed, {response_res.error}")
       return err(response_res.error)
     let response = response_res.get()
     let resOpc = response.payload.getOpc()
