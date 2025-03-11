@@ -4,6 +4,7 @@ import ./core/hci_status
 import ./core/opc
 import ./gap/types
 import ./gap/parsers
+from ./gatt/types import ConnParams
 import ./util
 export types, parsers
 
@@ -102,6 +103,27 @@ proc removeDeviceFromWhiteListReq*(self: BleClient, peer: PeerAddr): Future[bool
   buf[2] = peer.addrType.uint8
   buf.setBdAddr(3, peer.address)
   result = await self.btmRequest(procName, buf.toString, expOpc)
+
+# ------------------------------------------------------------------------------
+# 1.2.28 LE Connection Update 指示->確認->通知
+# ------------------------------------------------------------------------------
+proc gapConnectionUpdate*(self: BleClient, conHandle: uint16, params: ConnParams):
+    Future[bool] {.async.} =
+  const
+    procName = "gapConnectionUpdate"
+    insOpc = BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_INS
+    cfmOpc = BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_CFM
+    #evtOpc = BTM_D_OPC_BLE_GAP_CONNECTION_UPDATE_EVT
+  var buf: array[16, uint8]
+  buf.setOpc(0, insOpc)
+  buf.setLe16(2, conHandle)
+  buf.setLe16(4, params.conIntervalMin)
+  buf.setLe16(6, params.conIntervalMax)
+  buf.setLe16(8, params.conLatency)
+  buf.setLe16(10, params.supervisionTimeout)
+  buf.setLe16(12, params.minCeLength)
+  buf.setLe16(14, params.maxCeLength)
+  result = await self.btmRequest(procName, buf.toString, cfmOpc)
 
 # ==============================================================================
 # Instructs

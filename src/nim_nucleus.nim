@@ -358,7 +358,7 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
     res.port = some(port.Port)
   res.mode = mode
   res.iocap = iocap
-  res.waiter.waitDeviceQueue = newMailbox[BleDevice](16)
+  res.waiter.waitDeviceQueue = newMailbox[BleDevice](32)
   res.waiter.waiting = false
   res.scanLock = newAsyncLock()
   res.scan.whiteList = initHashSet[PeerAddr]()
@@ -824,6 +824,7 @@ proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, Erro
     let handleValues = handleValues_res.get()
     result = ok(handleValues[0])
   else:
+    syslog.error(&"! readGattChar: failed with {handleValues_res.error}")
     result = err(handleValues_res.error)
 
 # ------------------------------------------------------------------------------

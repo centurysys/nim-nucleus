@@ -244,10 +244,13 @@ proc gattReadUsingCharacteristicUuid*(self: GattClient, startHandle: uint16,
   buf.setUuid(8, uuid)
   let response_res = await self.gattSendRecv(buf.toString, cfmOpc, evtOpc)
   if response_res.isErr:
+    syslog.error("! gattReadUsingCharacteristicUuid: gattSendRecv error," &
+        &" {response_res.error}.")
     return err(response_res.error)
   let response = response_res.get()
   let res_opt = response.parseGattReadUsingCharacteristicUuid()
   if res_opt.isNone:
+    syslog.error("! gattReadUsingCharacteristicUuid: res_opt is None.")
     return err(ErrorCode.ParseError)
   result = ok(res_opt.get.values)
 
