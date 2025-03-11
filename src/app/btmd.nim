@@ -2,7 +2,9 @@ import std/locks
 import std/net
 import std/options
 import std/os
+import std/osproc
 import std/posix
+import std/sequtils
 import std/strformat
 import std/times
 import argparse
@@ -27,6 +29,7 @@ type
     path: string
     port: Option[Port]
     debug: bool
+    logging: bool
     snoop: bool
     remove: bool
   BtmResult {.pure, size: sizeof(uint8).} = enum
@@ -47,8 +50,24 @@ var
   btmInitialized: bool
   sock_opt: Option[Socket]
   bdAddrStr: string
+  logCmdRecv: bool
 
-const SigExceptionStr = "Signal Received"
+const
+  SigExceptionStr = "Signal Received"
+  StatFile = "/tmp/.btmd_running"
+  FailedCountFile = "/tmp/.btmd_init_failed"
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc incrementFailCount(): int =
+  if fileExists(FailedCountFile):
+    try:
+      result = FailedCountFile.readFile.strip.parseInt()
+    except:
+      discard
+  result.inc()
+  writeFile(FailedCountFile, $result)
 
 # ------------------------------------------------------------------------------
 #
@@ -122,6 +141,16 @@ proc handleResponseWhenUnconnected(buf: string) =
     echo &"! handleResponseWhenUnconnected: {buf.len} bytes discarded, {hexDump(buf)}"
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc logCmdResponse(cmdRes: bool, buf: string) =
+  let t = if cmdRes: "CMD" else: "RES"
+  let dump = buf.hexDump()
+  echo &"BTM [{t}]: {buf.len} bytes."
+  for line in dump.splitLines.filterIt(it.len > 0):
+    echo line
+
+# ------------------------------------------------------------------------------
 # BTM Callback
 # ------------------------------------------------------------------------------
 proc cmdCallback(buf: cstring, buflen: int) =
@@ -130,6 +159,9 @@ proc cmdCallback(buf: cstring, buflen: int) =
     let hdr = buflen.uint16
     discard sock.send(addr hdr, hdr.sizeOf)
     discard sock.send(buf, buflen)
+    if logCmdRecv:
+      let logbuf = $buf
+      logCmdResponse(cmdRes = false, logbuf)
   else:
     var s = newString(buflen)
     copyMem(addr s[0], buf, buflen)
@@ -193,12 +225,17 @@ proc initBtm(self: BtmServer): bool =
   syslog.info("Wait for BTM initialized...")
   lock.acquire()
   if not btmInitialized:
-    syslog.error("BTM initialize failed.")
+    let count = incrementFailCount()
+    syslog.error(&"BTM initialize failed (count: {count}), quit.")
     self.serverSock.close()
+    if count >= 3:
+      syslog.error("! reboot...")
+      discard execCmd("shutdown -r now")
     quit(1)
   syslog.info(&"BTM initialized, BD ADDRESS: {bdAddrStr}")
   self.btmStarted = true
   registerSignalHandler(SIGINT, sig_handler)
+  writeFile(StatFile, "")
   result = true
 
 # ------------------------------------------------------------------------------
@@ -226,6 +263,8 @@ proc handleClientRecv(self: BtmServer) =
     if buf.len == 0:
       break
     discard btmSend(buf)
+    if logCmdRecv:
+      logCmdResponse(cmdRes = true, buf)
 
 # ------------------------------------------------------------------------------
 #
@@ -261,7 +300,10 @@ proc rotateSnoopLog(self: BtmServer) =
 # ------------------------------------------------------------------------------
 proc run(self: BtmServer) =
   while true:
-    discard self.initBtm()
+    let initialized = self.initBtm()
+    if not initialized:
+      sleep(2000)
+      continue
     self.waitClient()
     if self.enableSnoop:
       self.rotateSnoopLog()
@@ -280,6 +322,7 @@ proc parseOptions(): AppOptions =
     argparse.option("-P", "--port", help = "bind port (localhost)")
     argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
+    argparse.flag("-l", "--logging", help = "enable logging")
     argparse.flag("-s", "--snoop", help = "enable snoop")
   let opts = p.parse()
   if opts.help:
@@ -297,6 +340,7 @@ proc parseOptions(): AppOptions =
       echo &"!!! invalid port, use UNIX domain socket."
   result.remove = opts.removeIfExists
   result.debug = opts.debug
+  result.logging = opts.logging
   result.snoop = opts.snoop
 
 # ------------------------------------------------------------------------------
@@ -304,8 +348,10 @@ proc parseOptions(): AppOptions =
 # ------------------------------------------------------------------------------
 proc main(): int =
   let opts = parseOptions()
+  logCmdRecv = opts.logging
   let btm = newBtmServer(opts)
   registerSignalHandler(SIGTERM, sig_handler)
+  registerSignalHandler(SIGINT, sig_handler)
   try:
     btm.run()
   except:
@@ -321,6 +367,7 @@ proc main(): int =
       syslog.info(err)
   discard btmStart(BtmMode.Shutdown)
   removeFile(opts.path)
+  removeFile(StatFile)
 
 
 when isMainModule:
