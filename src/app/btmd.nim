@@ -191,6 +191,11 @@ proc newBtmServer(opt: AppOptions): BtmServer =
     sock = newSocket(Domain.AF_UNIX, SOCK_STREAM, IPPROTO_IP)
     sock.setSockOpt(OptReuseAddr, true)
     sock.bindUnix(opt.path)
+    const permissions = {
+        fpUserExec, fpUserRead, fpUserWrite,
+        fpGroupExec, fpGroupRead, fpGroupWrite
+    }
+    setFilePermissions(opt.path, permissions)
   else:
     sock = newSocket(Domain.AF_INET, SOCK_STREAM, IPPROTO_IP)
     sock.setSockOpt(OptReuseAddr, true)
