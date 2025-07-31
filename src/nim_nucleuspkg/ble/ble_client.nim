@@ -366,10 +366,11 @@ proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Initialize (TCP)
 # ------------------------------------------------------------------------------
-proc initBTM*(self: BleClient, port: Port): Future[bool] {.async.} =
+proc initBTM*(self: BleClient, port: Port, host: string = "localhost"):
+    Future[bool] {.async.} =
   try:
     self.sock = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_IP)
-    await self.sock.connect("localhost", port)
+    await self.sock.connect(host, port)
     await self.initTasks()
     result = true
   except:

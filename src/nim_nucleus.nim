@@ -42,6 +42,7 @@ type
     ble: BleClient
     path: string
     port: Option[Port]
+    host: Option[string]
     mode: SecurityMode
     iocap: IoCap
     running: bool
@@ -316,8 +317,8 @@ proc init*(self: BleNim): Future[bool] {.async.} =
   ## BleNim 内部で使用している NetNucleus の初期化を行う。
   if self.running:
     return true
-  if self.port.isSome:
-    result = await self.ble.initBTM(self.port.get)
+  if self.port.isSome and self.host.isSome:
+    result = await self.ble.initBTM(self.port.get, self.host.get)
   else:
     result = await self.ble.initBTM(self.path)
   if result:
@@ -334,11 +335,12 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
-    debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
+proc newBleNim*(path: string = socketPath, host: string = "localhost", port: uint16 = 0,
+    debug = false, debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
     iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
   ## BleNim インスタンスの初期化
   ## - path: btmd が listen している Unix Domain Socket PATH
+  ## - host: btmd が listen しているホスト名
   ## - port: localhost の TCP 経由で通信する場合の btmd の listen port(0 以外の場合)
   ## - mode: LE Sucurity Mode
   ##   - SecurityMode.NoAuth: (No authentication and no encryption)
@@ -354,8 +356,9 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
   res.path = path
-  if port > 0:
+  if port > 0 and host.len > 0:
     res.port = some(port.Port)
+    res.host = some(host)
   res.mode = mode
   res.iocap = iocap
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](32)
