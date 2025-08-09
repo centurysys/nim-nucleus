@@ -27,6 +27,7 @@ type
   BtmServer = ref BtmServerObj
   AppOptions = object
     path: string
+    host: Option[string]
     port: Option[Port]
     debug: bool
     logging: bool
@@ -199,7 +200,7 @@ proc newBtmServer(opt: AppOptions): BtmServer =
   else:
     sock = newSocket(Domain.AF_INET, SOCK_STREAM, IPPROTO_IP)
     sock.setSockOpt(OptReuseAddr, true)
-    sock.bindAddr(opt.port.get, "localhost")
+    sock.bindAddr(opt.port.get, opt.host.get)
   sock.listen()
   result.serverSock = sock
   lock.initLock()
@@ -324,7 +325,8 @@ proc run(self: BtmServer) =
 proc parseOptions(): AppOptions =
   let p = newParser("btmd"):
     argparse.option("-p", "--path", default = socketPath, help = "bind path")
-    argparse.option("-P", "--port", help = "bind port (localhost)")
+    argparse.option("-P", "--port", help = "bind port")
+    argparse.option("-H", "--host", default = "localhost", help = "bind host")
     argparse.flag("-r", "--remove-if-exists", help = "remove socket if exists")
     argparse.flag("-d", "--debug", help = "enable debug")
     argparse.flag("-l", "--logging", help = "enable logging")
@@ -341,6 +343,10 @@ proc parseOptions(): AppOptions =
     try:
       let port = opts.port.parseInt.Port
       result.port = some(port)
+      if opts.host.len > 0:
+        result.host = some(opts.host)
+      else:
+        result.host = some("localhost")
     except:
       echo &"!!! invalid port, use UNIX domain socket."
   result.remove = opts.removeIfExists

@@ -366,10 +366,11 @@ proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Initialize (TCP)
 # ------------------------------------------------------------------------------
-proc initBTM*(self: BleClient, port: Port): Future[bool] {.async.} =
+proc initBTM*(self: BleClient, port: Port, host: string = "localhost"):
+    Future[bool] {.async.} =
   try:
     self.sock = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_IP)
-    await self.sock.connect("localhost", port)
+    await self.sock.connect(host, port)
     await self.initTasks()
     result = true
   except:
@@ -495,6 +496,8 @@ proc handleGattDisconnection*(self: BleClient, gattId: uint16):
     Future[Option[PeerAddr]] {.async.} =
   let gattClient = self.gattClients.getOrdefault(gattId, nil)
   if gattClient.isNil:
+    let logmsg = &"* handleGattDisconnection: already disconnected gattId: {gattId}."
+    syslog.info(logmsg)
     return
   gattClient.connected = false
   if gattClient.encryptionWait.locked:
@@ -548,9 +551,11 @@ proc waitEvent*(self: GattClient, timeout = 0): Future[Result[GattEvent, ErrorCo
       result = err(ErrorCode.Disconnected)
     else:
       result = await mbx.get(timeout)
+  except IOError:
+    result = err(ErrorCode.Disconnected)
   except:
-    let err = getCurrentExceptionMsg()
-    let errmsg = &"! waitEvent: caught exception, {err}."
+    let err = getCurrentException()
+    let errmsg = &"! waitEvent: caught exception, {err.msg}."
     syslog.error(errmsg)
 
 # ------------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import nim_nucleuspkg/submodule
 export results, asyncsync, mailbox
 export SecurityMode, IoCap, PeerAddr, ScanFilterPolicy
 export HandleValue, ErrorCode
+export RemoteCollectionKeys
 export util
 
 type
@@ -42,6 +43,7 @@ type
     ble: BleClient
     path: string
     port: Option[Port]
+    host: Option[string]
     mode: SecurityMode
     iocap: IoCap
     running: bool
@@ -50,6 +52,7 @@ type
     eventQueue: AsyncQueue[string]
     devices: Table[PeerAddr, BleDevice]
     bondedKeys: Table[PeerAddr, RemoteCollectionKeys]
+    lastKeySetTime: Option[DateTime]
     tblGatt: Table[PeerAddr, Gatt]
     waiter: DeviceWait
   BleNim* = ref BleNimObj
@@ -93,6 +96,15 @@ proc `$`*(x: BleDevice): string =
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc findDevice(self: BleNim, peer: PeerAddr): Option[PeerAddr] =
+  let peerAddrString = peer.address.bdAddr2string()
+  for peer, device in self.devices.pairs:
+    if peer.stringValue == peerAddrString:
+      return some(peer)
+
+# ------------------------------------------------------------------------------
 # Handler: Advertising
 # ------------------------------------------------------------------------------
 proc advertisingHandler(self: BleNim) {.async.} =
@@ -125,9 +137,9 @@ proc advertisingHandler(self: BleNim) {.async.} =
 # SM: LE ローカルセキュリティ設定通知 保存
 # ------------------------------------------------------------------------------
 proc setLocalSecurityData(self: BleNim, localSecurity: LocalSecurity) =
-  let peer = localSecurity.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(localSecurity.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.auth = localSecurity.auth
     device.keys.encKeySize = localSecurity.encKeySize
     device.keys.authorized = localSecurity.authorization
@@ -136,18 +148,18 @@ proc setLocalSecurityData(self: BleNim, localSecurity: LocalSecurity) =
 # SM: LE LTK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setLtk(self: BleNim, peerLtk: LtkEvent) =
-  let peer = peerLtk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerLtk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.ltk = peerLtk.ltk
 
 # ------------------------------------------------------------------------------
 # SM: LE EDIV Rand 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setEdivRand(self: BleNim, edivRand: EdivRandEvent) =
-  let peer = edivRand.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(edivRand.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.ediv = edivRand.ediv
     device.keys.rand = edivRand.rand
 
@@ -155,31 +167,33 @@ proc setEdivRand(self: BleNim, edivRand: EdivRandEvent) =
 # SM: LE IRK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setIrk(self: BleNim, peerIrk: IrkEvent) =
-  let peer = peerIrk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerIrk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.irk = peerIrk.irk
 
 # ------------------------------------------------------------------------------
 # SM: LE CSRK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setCsrk(self: BleNim, peerCsrk: CsrkEvent) =
-  let peer = peerCsrk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerCsrk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.csrk = peerCsrk.csrk
 
 # ------------------------------------------------------------------------------
 # SM: LE 認証完了通知 保存
 # ------------------------------------------------------------------------------
 proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
-  let peer = authComplete.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(authComplete.peer)
+  if peerAddr_opt.isSome:
+    let peer = peerAddr_opt.get()
+    let device = self.devices.getOrDefault(peer)
     device.keys.valid = true
-    device.keys.peer = peer
+    device.keys.peer = peerAddr_opt.get()
     device.keys.peerAddrStr = peer.address.bdAddr2string()
     self.bondedKeys[peer] = device.keys
+    self.lastKeySetTime = some(now())
 
 # ------------------------------------------------------------------------------
 # GAP: LE Encryption Change 通知
@@ -213,8 +227,10 @@ proc handleGattDisconnection(self: BleNim, event: GattDisconEvent)
     let peer = peer_opt.get()
     let gatt = self.tblGatt.getOrDefault(peer)
     if not gatt.isNil:
-      discard await gatt.gatt.disconnect()
+      discard await gatt.gatt.disconnect(active = false)
       gatt.connected = false
+      gatt.gatt.conHandle = 0
+      gatt.gatt.gattId = 0
 
 # ------------------------------------------------------------------------------
 # GAP: LE Connection Complete 通知 (中断時)
@@ -316,8 +332,8 @@ proc init*(self: BleNim): Future[bool] {.async.} =
   ## BleNim 内部で使用している NetNucleus の初期化を行う。
   if self.running:
     return true
-  if self.port.isSome:
-    result = await self.ble.initBTM(self.port.get)
+  if self.port.isSome and self.host.isSome:
+    result = await self.ble.initBTM(self.port.get, self.host.get)
   else:
     result = await self.ble.initBTM(self.path)
   if result:
@@ -334,11 +350,12 @@ proc init*(self: BleNim): Future[bool] {.async.} =
 # ------------------------------------------------------------------------------
 # Constructor:
 # ------------------------------------------------------------------------------
-proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
-    debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
+proc newBleNim*(path: string = socketPath, host: string = "localhost", port: uint16 = 0,
+    debug = false, debug_stack = false, mode: SecurityMode = SecurityMode.Level2,
     iocap: IoCap = IoCap.NoInputNoOutput, initialize = false): BleNim =
   ## BleNim インスタンスの初期化
   ## - path: btmd が listen している Unix Domain Socket PATH
+  ## - host: btmd が listen しているホスト名
   ## - port: localhost の TCP 経由で通信する場合の btmd の listen port(0 以外の場合)
   ## - mode: LE Sucurity Mode
   ##   - SecurityMode.NoAuth: (No authentication and no encryption)
@@ -354,8 +371,9 @@ proc newBleNim*(path: string = socketPath, port: uint16 = 0, debug = false,
   let res = new BleNim
   res.ble = newBleClient(debug, debug_stack)
   res.path = path
-  if port > 0:
+  if port > 0 and host.len > 0:
     res.port = some(port.Port)
+    res.host = some(host)
   res.mode = mode
   res.iocap = iocap
   res.waiter.waitDeviceQueue = newMailbox[BleDevice](32)
@@ -473,7 +491,7 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
       self.scan.window = paramScanWindow
       self.scan.active = active
       self.scan.filterPolicy = filterPolicy
-    self.devices.clear()
+    #self.devices.clear()
     result = await self.ble.setScanEnableReq(scanEnable = true, filterDuplicates)
     if not result:
       syslog.error(&"! {procName}: enable scannning failed.")
@@ -623,8 +641,11 @@ proc setAllRemoteCollectionKeys*(self: BleNim, allKeys: seq[RemoteCollectionKeys
       let res = await self.setRemoteCollectionKeys(keys)
       if res:
         result.inc
+  if result > 0:
+    syslog.info(&"* setAllRemoteCollectionKeys: {result} key(s) set.")
 
-proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[int] {.async.} =
+proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode):
+    Future[int] {.async.} =
   ## 上の関数と機能は同じだが、seq\[RemoteCollectionKeys\] を JSON 化した JsonNode 形式を引数にする。
   try:
     let allKeys = allKeysJson.to(seq[RemoteCollectionKeys])
@@ -751,7 +772,11 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
     let errmsg = "! Gatt::disconnect: already disconnected."
     syslog.error(errmsg)
     return
-  discard await self.gatt.disconnect()
+  let active = if self.gatt.isConnected and self.gatt.gattId != 0: true
+      else: false
+  if active:
+    syslog.info(&"* Gatt::disconnect: active, gattId: {self.gatt.gattId}.")
+  discard await self.gatt.disconnect(active)
   if unpair:
     discard await self.ble.removeRemoteCollectionKeys(self.peer)
   let peer = self.peer
