@@ -80,6 +80,8 @@ proc gattCommonConnectIns*(self: BleClient, params: GattConnParams):
 # ------------------------------------------------------------------------------
 proc gattCommonDisconnectIns*(self: BleClient, gattId: uint16):
     Future[Result[int16, ErrorCode]] {.async.} =
+  if gattId == 0:
+    return err(ErrorCode.ValueError)
   const
     procName = "gattCommonDisconnectIns"
     indOpc = BTM_D_OPC_BLE_GATT_CMN_DISCONNECT_INS
@@ -193,11 +195,12 @@ proc gattConnect*(self: BleClient, params: GattConnParams, timeout: int = 0):
 # ------------------------------------------------------------------------------
 # Disconnect
 # ------------------------------------------------------------------------------
-proc disconnect*(self: GattClient): Future[bool] {.async.} =
-  let gattId = self.gattId
-  let response_res = await self.bleClient.gattCommonDisconnectIns(gattId)
-  if response_res.isErr:
-    return
+proc disconnect*(self: GattClient, active: bool = true): Future[bool] {.async.} =
+  if active:
+    let gattId = self.gattId
+    let response_res = await self.bleClient.gattCommonDisconnectIns(gattId)
+    if response_res.isErr:
+      return
   let eventMbx = self.mailboxes.gattEventMbx
   if not eventMbx.isNil:
     eventMbx.close()

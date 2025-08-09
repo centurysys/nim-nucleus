@@ -227,8 +227,10 @@ proc handleGattDisconnection(self: BleNim, event: GattDisconEvent)
     let peer = peer_opt.get()
     let gatt = self.tblGatt.getOrDefault(peer)
     if not gatt.isNil:
-      discard await gatt.gatt.disconnect()
+      discard await gatt.gatt.disconnect(active = false)
       gatt.connected = false
+      gatt.gatt.conHandle = 0
+      gatt.gatt.gattId = 0
 
 # ------------------------------------------------------------------------------
 # GAP: LE Connection Complete 通知 (中断時)
@@ -639,8 +641,11 @@ proc setAllRemoteCollectionKeys*(self: BleNim, allKeys: seq[RemoteCollectionKeys
       let res = await self.setRemoteCollectionKeys(keys)
       if res:
         result.inc
+  if result > 0:
+    syslog.info(&"* setAllRemoteCollectionKeys: {result} key(s) set.")
 
-proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode): Future[int] {.async.} =
+proc setAllRemoteCollectionKeys*(self: BleNim, allKeysJson: JsonNode):
+    Future[int] {.async.} =
   ## 上の関数と機能は同じだが、seq\[RemoteCollectionKeys\] を JSON 化した JsonNode 形式を引数にする。
   try:
     let allKeys = allKeysJson.to(seq[RemoteCollectionKeys])
@@ -767,7 +772,11 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
     let errmsg = "! Gatt::disconnect: already disconnected."
     syslog.error(errmsg)
     return
-  discard await self.gatt.disconnect()
+  let active = if self.gatt.isConnected and self.gatt.gattId != 0: true
+      else: false
+  if active:
+    syslog.info(&"* Gatt::disconnect: active, gattId: {self.gatt.gattId}.")
+  discard await self.gatt.disconnect(active)
   if unpair:
     discard await self.ble.removeRemoteCollectionKeys(self.peer)
   let peer = self.peer
