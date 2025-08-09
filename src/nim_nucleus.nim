@@ -13,6 +13,7 @@ import nim_nucleuspkg/submodule
 export results, asyncsync, mailbox
 export SecurityMode, IoCap, PeerAddr, ScanFilterPolicy
 export HandleValue, ErrorCode
+export RemoteCollectionKeys
 export util
 
 type
@@ -51,6 +52,7 @@ type
     eventQueue: AsyncQueue[string]
     devices: Table[PeerAddr, BleDevice]
     bondedKeys: Table[PeerAddr, RemoteCollectionKeys]
+    lastKeySetTime: Option[DateTime]
     tblGatt: Table[PeerAddr, Gatt]
     waiter: DeviceWait
   BleNim* = ref BleNimObj
@@ -94,6 +96,15 @@ proc `$`*(x: BleDevice): string =
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
+proc findDevice(self: BleNim, peer: PeerAddr): Option[PeerAddr] =
+  let peerAddrString = peer.address.bdAddr2string()
+  for peer, device in self.devices.pairs:
+    if peer.stringValue == peerAddrString:
+      return some(peer)
+
+# ------------------------------------------------------------------------------
 # Handler: Advertising
 # ------------------------------------------------------------------------------
 proc advertisingHandler(self: BleNim) {.async.} =
@@ -126,9 +137,9 @@ proc advertisingHandler(self: BleNim) {.async.} =
 # SM: LE ローカルセキュリティ設定通知 保存
 # ------------------------------------------------------------------------------
 proc setLocalSecurityData(self: BleNim, localSecurity: LocalSecurity) =
-  let peer = localSecurity.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(localSecurity.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.auth = localSecurity.auth
     device.keys.encKeySize = localSecurity.encKeySize
     device.keys.authorized = localSecurity.authorization
@@ -137,18 +148,18 @@ proc setLocalSecurityData(self: BleNim, localSecurity: LocalSecurity) =
 # SM: LE LTK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setLtk(self: BleNim, peerLtk: LtkEvent) =
-  let peer = peerLtk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerLtk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.ltk = peerLtk.ltk
 
 # ------------------------------------------------------------------------------
 # SM: LE EDIV Rand 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setEdivRand(self: BleNim, edivRand: EdivRandEvent) =
-  let peer = edivRand.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(edivRand.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.ediv = edivRand.ediv
     device.keys.rand = edivRand.rand
 
@@ -156,31 +167,33 @@ proc setEdivRand(self: BleNim, edivRand: EdivRandEvent) =
 # SM: LE IRK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setIrk(self: BleNim, peerIrk: IrkEvent) =
-  let peer = peerIrk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerIrk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.irk = peerIrk.irk
 
 # ------------------------------------------------------------------------------
 # SM: LE CSRK 受信通知 保存
 # ------------------------------------------------------------------------------
 proc setCsrk(self: BleNim, peerCsrk: CsrkEvent) =
-  let peer = peerCsrk.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(peerCsrk.peer)
+  if peerAddr_opt.isSome:
+    let device = self.devices.getOrDefault(peerAddr_opt.get)
     device.keys.csrk = peerCsrk.csrk
 
 # ------------------------------------------------------------------------------
 # SM: LE 認証完了通知 保存
 # ------------------------------------------------------------------------------
 proc setAuthCompleted(self: BleNim, authComplete: AuthCompleteEvent) =
-  let peer = authComplete.peer
-  let device = self.devices.getOrDefault(peer)
-  if not device.isNil:
+  let peerAddr_opt = self.findDevice(authComplete.peer)
+  if peerAddr_opt.isSome:
+    let peer = peerAddr_opt.get()
+    let device = self.devices.getOrDefault(peer)
     device.keys.valid = true
-    device.keys.peer = peer
+    device.keys.peer = peerAddr_opt.get()
     device.keys.peerAddrStr = peer.address.bdAddr2string()
     self.bondedKeys[peer] = device.keys
+    self.lastKeySetTime = some(now())
 
 # ------------------------------------------------------------------------------
 # GAP: LE Encryption Change 通知
@@ -476,7 +489,7 @@ proc startStopScan*(self: BleNim, active: bool, enable: bool, scanInterval: uint
       self.scan.window = paramScanWindow
       self.scan.active = active
       self.scan.filterPolicy = filterPolicy
-    self.devices.clear()
+    #self.devices.clear()
     result = await self.ble.setScanEnableReq(scanEnable = true, filterDuplicates)
     if not result:
       syslog.error(&"! {procName}: enable scannning failed.")
