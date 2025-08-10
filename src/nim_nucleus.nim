@@ -12,7 +12,7 @@ import results
 import nim_nucleuspkg/submodule
 export results, asyncsync, mailbox
 export SecurityMode, IoCap, PeerAddr, ScanFilterPolicy
-export HandleValue, ErrorCode
+export HandleValue, ErrorCode, ConnParams
 export RemoteCollectionKeys
 export util
 
@@ -790,6 +790,35 @@ proc disconnect*(self: Gatt, unpair = false) {.async.} =
 # ------------------------------------------------------------------------------
 proc isConnected*(self: Gatt): bool =
   result = self.connected
+
+# ------------------------------------------------------------------------------
+# API: Connection Update
+# ------------------------------------------------------------------------------
+proc connectionUpdate*(self: Gatt, connParams: ConnParams): Future[Result[bool, ErrorCode]]
+    {.async.} =
+  ## GATT 接続のパラメータを更新する。
+  ## - connParams: 更新する接続パラメータ
+  if not self.connected:
+    return err(ErrorCode.Disconnected)
+  let conHandle = self.gatt.conHandle
+  let res = await self.gatt.bleClient.gapConnectionUpdate(conHandle, connParams)
+  if not res:
+    result = err(ErrorCode.ValueError)
+  else:
+    result = ok(true)
+
+proc connectionUpdate*(self: Gatt, conIntervalMin: uint16, conIntervalMax: uint16,
+    conLatency: uint16, supervisionTimeout: uint16, minCeLength: uint16 = 0,
+    maxCeLength: uint16 = 0): Future[Result[bool, ErrorCode]] {.async.} =
+  let connParams = ConnParams(
+    conIntervalMin: conIntervalMin,
+    conIntervalMax: conIntervalMax,
+    conLatency: conLatency,
+    supervisionTimeout: supervisionTimeout,
+    minCeLength: minCeLength,
+    maxCeLength: maxCeLength
+  )
+  result = await self.connectionUpdate(connParams)
 
 # ------------------------------------------------------------------------------
 # API:
