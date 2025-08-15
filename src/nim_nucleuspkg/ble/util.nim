@@ -218,8 +218,11 @@ proc string2bdAddr*(x: string): Option[uint64] =
   try:
     let buf = x.split(":").mapIt(it.parseHexInt)
     if buf.len != 6:
-      return
+      raise newException(ValueError, "invalid Bluetooth address format")
     for idx, octet in buf.pairs:
+      if octet < 0 or octet > 255:
+        let ex = &"! invalid octet value at index {idx}, {octet}"
+        raise newException(ValueError, ex)
       address = address or (octet.uint64 shl ((5 - idx) * 8))
     result = some(address)
   except:
