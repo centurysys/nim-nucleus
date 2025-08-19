@@ -623,15 +623,16 @@ proc gattSend*(self: GattClient, payload: string, expOpc: uint16):
 # ------------------------------------------------------------------------------
 # API: Send Instrucion -> Wait Event
 # ------------------------------------------------------------------------------
-proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: uint16):
-    Future[Result[string, ErrorCode]] {.async.} =
+proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: uint16,
+    suppressLogs = false): Future[Result[string, ErrorCode]] {.async.} =
   let send_res = await self.gattSend(payload, cfmOpc)
   if send_res.isErr:
     return err(send_res.error)
   while true:
     let response_res = await self.waitEvent()
     if response_res.isErr:
-      syslog.error(&"! gattSendRecv: waitEvent() failed, {response_res.error}")
+      if not suppressLogs:
+        syslog.error(&"! gattSendRecv: waitEvent() failed, {response_res.error}")
       return err(response_res.error)
     let response = response_res.get()
     let resOpc = response.payload.getOpc()
@@ -640,7 +641,8 @@ proc gattSendRecv*(self: GattClient, payload: string, cfmOpc: uint16, evtOpc: ui
         self.gattHandleExchangeMtuEvent(response.payload)
         continue
       else:
-        syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
+        if not suppressLogs:
+          syslog.error(&"! gattSendRecv: OPC in event mismatch, {resOpc:04x} != {evtOpc:04x}")
         result = err(ErrorCode.OpcMismatch)
         break
     else:
