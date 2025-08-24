@@ -717,10 +717,10 @@ type
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
-proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
-    Future[Result[Gatt, ErrorCode]] {.async.} =
+proc connect(self: BleNim, connParams: GattConnParams, autoRescan = false,
+    timeout: int): Future[Result[Gatt, ErrorCode]] {.async.} =
   const ProcName = &"{ModName}::connect"
-  proc restartScan(self: BleNim) {.async.} =
+  proc restartScan() {.async.} =
     discard await self.startStopScan(active = self.scan.active, enable = true,
         filterDuplicates = self.scan.filter, filterPolicy = self.scan.filterPolicy)
 
@@ -741,7 +741,7 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   if client_res.isErr:
     discard await self.ble.gattCommonConnectCancelIns()
     if needScanRestart:
-      await self.restartScan()
+      await restartScan()
     return err(client_res.error)
   let res = new Gatt
   res.gatt = client_res.get()
@@ -750,30 +750,32 @@ proc connect(self: BleNim, connParams: GattConnParams, timeout: int):
   res.ble = self
   self.tblGatt[res.peer] = res
   result = ok(res)
+  if needScanRestart and autoRescan:
+    await restartScan()
 
 # ------------------------------------------------------------------------------
 # API: Connection
 # ------------------------------------------------------------------------------
-proc connect*(self: BleNim, device: BleDevice, timeout = 10 * 1000):
-    Future[Result[Gatt, ErrorCode]] {.async.} =
+proc connect*(self: BleNim, device: BleDevice, autoRescan = false,
+    timeout = 10 * 1000): Future[Result[Gatt, ErrorCode]] {.async.} =
   ## ペリフェラルに GATT 接続を行う。
   let address = device.peer.address
   let random = (device.peer.addrType == AddrType.Random)
   let connParams = gattDefaultGattConnParams(address, random)
-  result = await self.connect(connParams, timeout)
+  result = await self.connect(connParams, autoRescan, timeout)
 
 # ------------------------------------------------------------------------------
 # API: Connection
 # ------------------------------------------------------------------------------
-proc connect*(self: BleNim, deviceAddr: string, random = false, timeout = 10 * 1000):
-    Future[Result[Gatt, ErrorCode]] {.async.} =
+proc connect*(self: BleNim, deviceAddr: string, random = false, autoRescan = false,
+    timeout = 10 * 1000): Future[Result[Gatt, ErrorCode]] {.async.} =
   ## ペリフェラルに GATT 接続を行う。
   let address_opt = deviceAddr.string2bdAddr()
   if address_opt.isNone:
     return err(ErrorCode.ValueError)
   let address = address_opt.get()
   let connParams = gattDefaultGattConnParams(address, random)
-  result = await self.connect(connParams, timeout)
+  result = await self.connect(connParams, autoRescan, timeout)
 
 # ------------------------------------------------------------------------------
 # API: Disconnect
