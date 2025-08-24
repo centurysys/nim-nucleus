@@ -680,7 +680,20 @@ proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.a
   let device = self.devices.getOrDefault(peer)
   if not device.isNil:
     zeroMem(addr device.keys, device.keys.sizeof)
+  self.bondedKeys.del(peer)
   result = true
+
+# ------------------------------------------------------------------------------
+# API: Remove All Remote Collection Keys
+# ------------------------------------------------------------------------------
+proc removeAllRemoteCollectionKeys*(self: BleNim): Future[bool] {.async.} =
+  if self.bondedKeys.len == 0:
+    return true
+  for peer in self.bondedKeys.keys:
+    result = await self.removeRemoteCollectionKeys(peer)
+    if not result:
+      syslog.error(&"! removeAllRemoteCollectionKeys: failed to remove keys for {peer}.")
+      break
 
 # ==============================================================================
 # GATT
