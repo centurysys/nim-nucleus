@@ -500,10 +500,10 @@ proc handleGattDisconnection*(self: BleClient, gattId: uint16):
     syslog.info(logmsg)
     return
   gattClient.connected = false
+  gattClient.encrypted = false
   if gattClient.encryptionWait.locked:
     let logmsg = "* handleGattDisconnection: release EncryptionWait lock."
     syslog.info(logmsg)
-    gattClient.encrypted = false
     gattClient.encryptionWait.release()
   let peer = gattClient.peer
   result = some(peer)
@@ -685,6 +685,8 @@ proc gattSendRecvMulti*(self: GattClient, payload: string, cfmOpc: uint16,
 proc waitEncryptionComplete*(self: GattClient): Future[Result[bool, ErrorCode]]
     {.async.} =
   if self.encrypted:
+    let logmsg = &"* waitEncryptionComplete: already encrypted ???"
+    syslog.warning(logmsg)
     return ok(true)
   self.encryptionWait.own()
   await self.encryptionWait.acquire()
@@ -723,6 +725,7 @@ proc newGattClient*(self: BleClient, gattId: uint16, conHandle: uint16):
   client.encryptionWait = newAsyncLock()
   client.mailboxes = gattMailboxes
   client.connected = true
+  client.encrypted = false
   client.debug = self.debug
   result = some(client)
 

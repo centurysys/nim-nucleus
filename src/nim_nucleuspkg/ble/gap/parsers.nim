@@ -153,7 +153,13 @@ proc parseEncryptionChange*(payload: string): Option[EncryptionChangeEvent] =
     var res: EncryptionChangeEvent
     res.hciStatus = payload.getU8(2).toHciStatus
     res.conHandle = payload.getLe16(3)
-    res.encryptionEnabled = payload.getU8(5) == 0x01'u8
+    if res.hciStatus != HciStatus.BLE_HCI_SUCCESS:
+      let statStr = res.hciStatus.strHciStatus()
+      let errmsg = &"! {procName}: status: {statStr}"
+      syslog.error(errmsg)
+      res.encryptionEnabled = false
+    else:
+      res.encryptionEnabled = payload.getU8(5) == 0x01'u8
     result = some(res)
   except:
     let err = getCurrentExceptionMsg()
