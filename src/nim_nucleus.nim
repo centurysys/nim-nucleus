@@ -689,10 +689,16 @@ proc removeRemoteCollectionKeys*(self: BleNim, peer: PeerAddr): Future[bool] {.a
 proc removeAllRemoteCollectionKeys*(self: BleNim): Future[bool] {.async.} =
   if self.bondedKeys.len == 0:
     return true
+
+  var peers = newSeqOfCap[PeerAddr](self.bondedKeys.len)
   for peer in self.bondedKeys.keys:
-    result = await self.removeRemoteCollectionKeys(peer)
-    if not result:
+    peers.add(peer)
+
+  result = true
+  for peer in peers:
+    if not await self.removeRemoteCollectionKeys(peer):
       syslog.error(&"! removeAllRemoteCollectionKeys: failed to remove keys for {peer}.")
+      result = false
       break
 
 # ==============================================================================
