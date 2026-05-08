@@ -254,7 +254,7 @@ proc len*[T](aq: AsyncQueue[T]): int {.inline.} =
 
 proc size*[T](aq: AsyncQueue[T]): int {.inline.} =
   ## Return the maximum number of elements in ``aq``.
-  result = len(aq.maxsize)
+  result = aq.maxsize
 
 when isMainModule:
   # Locks test
