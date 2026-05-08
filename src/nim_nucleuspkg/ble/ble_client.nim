@@ -246,13 +246,45 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
     discard await mbx.gattNotifyMbx.put(event)
 
 # ------------------------------------------------------------------------------
+# Receive exact number of bytes from async socket
+# ------------------------------------------------------------------------------
+proc recvExact(sock: AsyncSocket, size: int): Future[Option[string]] {.async.} =
+  if size <= 0:
+    return some("")
+
+  var buf = newStringOfCap(size)
+  while buf.len < size:
+    let chunk = await sock.recv(size - buf.len)
+    if chunk.len == 0:
+      return none(string)
+    buf.add(chunk)
+
+  result = some(buf)
+
+# ------------------------------------------------------------------------------
 # BTM Task: Response Handler
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
   while true:
-    let hdr = await self.sock.recv(2)
+    let hdrOpt = await self.sock.recvExact(2)
+    if hdrOpt.isNone:
+      self.running = false
+      syslog.info("BTM socket closed while reading packet header.")
+      break
+
+    let hdr = hdrOpt.get()
     let pktlen = hdr.getLe16(0).int
-    let response = await self.sock.recv(pktlen)
+    if pktlen <= 0:
+      self.debugEcho("! responseHandler: empty packet")
+      continue
+
+    let responseOpt = await self.sock.recvExact(pktlen)
+    if responseOpt.isNone:
+      self.running = false
+      syslog.info("BTM socket closed while reading packet body.")
+      break
+
+    let response = responseOpt.get()
     if response.len < 3:
       self.debugEcho("! responseHandler: ?????")
       continue
