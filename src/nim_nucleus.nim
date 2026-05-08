@@ -885,15 +885,16 @@ proc readGattChar*(self: Gatt, uuid: string): Future[Result[HandleValue, ErrorCo
 # ------------------------------------------------------------------------------
 # API: Read Characteristics (UUID enum)
 # ------------------------------------------------------------------------------
-proc readGattChar*(self: Gatt, uuid: CharaUuid): Future[Result[HandleValue, ErrorCode]]
-    {.async.} =
+proc readGattChar*(self: Gatt, uuid: CharaUuid, suppressLogs = false):
+    Future[Result[HandleValue, ErrorCode]] {.async.} =
   let handleValues_res = await self.gatt.gattReadUsingCharacteristicUuid(0x0001'u16,
-      0xffff'u16, $uuid)
+      0xffff'u16, $uuid, suppressLogs)
   if handleValues_res.isOk:
     let handleValues = handleValues_res.get()
     result = ok(handleValues[0])
   else:
-    syslog.error(&"! readGattChar: failed with {handleValues_res.error}")
+    if not suppressLogs:
+      syslog.error(&"! readGattChar: failed with {handleValues_res.error}")
     result = err(handleValues_res.error)
 
 # ------------------------------------------------------------------------------
