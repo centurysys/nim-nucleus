@@ -81,6 +81,11 @@ src/
       syslog.nim                   Logging helpers
 ```
 
+## Documentation
+
+- [API Guide](docs/api-guide.md)
+- [API Guide (Japanese)](docs/api-guide.ja.md)
+
 ## Requirements
 
 - Nim 2.2.4 or newer

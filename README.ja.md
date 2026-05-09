@@ -48,7 +48,7 @@ btmd
 Bluetooth controller / BLE stack
 ```
 
-`btmd` は通常、NetNucleus runtime が入っている実機側で動かします。  
+`btmd` は通常、NetNucleus runtime が入っている実機側で動かします。
 通常の開発 PC 上で `btmd` を動かす必要はありません。開発 PC 側に NetNucleus runtime が入っている場合だけ、`btmd` を直接起動して動作確認できます。
 
 ## リポジトリ構成
@@ -76,6 +76,11 @@ src/
       errcode.nim                  ErrorCode 定義
       syslog.nim                   logging helper
 ```
+
+## ドキュメント
+
+- [API Guide](docs/api-guide.md)
+- [API Guide 日本語版](docs/api-guide.ja.md)
 
 ## 必要なもの
 
