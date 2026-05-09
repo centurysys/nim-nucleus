@@ -108,8 +108,12 @@ proc findDevice(self: BleNim, peer: PeerAddr): Option[PeerAddr] =
 # Handler: Advertising
 # ------------------------------------------------------------------------------
 proc advertisingHandler(self: BleNim) {.async.} =
-  while true:
-    let payload_res = await self.ble.waitAdvertising()
+  while self.running:
+    var payload_res: Result[string, ErrorCode]
+    try:
+      payload_res = await self.ble.waitAdvertising()
+    except:
+      break
     if payload_res.isErr:
       break
     let payload = payload_res.get()
@@ -260,9 +264,15 @@ proc handleGattConnection(self: BleNim, event: GattConEvent) {.async.} =
 # Handler: GAP/SM Events
 # ------------------------------------------------------------------------------
 proc eventHandler(self: BleNim) {.async.} =
-  while true:
-    let payload_res = await self.ble.waitEvent()
+  while self.running:
+    var payload_res: Result[string, ErrorCode]
+    try:
+      payload_res = await self.ble.waitEvent()
+    except:
+      break
     if payload_res.isErr:
+      if not self.running:
+        break
       continue
     let payload = payload_res.get()
     let notify_opt = payload.parseEvent()
@@ -326,6 +336,24 @@ proc eventHandler(self: BleNim) {.async.} =
       syslog.info(logmsg)
 
 # ------------------------------------------------------------------------------
+# API: Close
+# ------------------------------------------------------------------------------
+proc close*(self: BleNim) =
+  ## Stop background handlers and close the connection to btmd.
+  if self.isNil:
+    return
+
+  self.running = false
+  try:
+    if not self.waiter.waitDeviceQueue.isNil:
+      self.waiter.waitDeviceQueue.close()
+  except:
+    discard
+
+  if not self.ble.isNil:
+    self.ble.close()
+
+# ------------------------------------------------------------------------------
 # API: async initialization
 # ------------------------------------------------------------------------------
 proc init*(self: BleNim): Future[bool] {.async.} =
@@ -343,9 +371,9 @@ proc init*(self: BleNim): Future[bool] {.async.} =
     if not await self.ble.setLocalIoCapabilitiesReq(self.iocap):
       syslog.error("! Setup Local IO Capabilities failed.")
       return
+    self.running = true
     asyncCheck self.advertisingHandler()
     asyncCheck self.eventHandler()
-    self.running = true
 
 # ------------------------------------------------------------------------------
 # Constructor:
