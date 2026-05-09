@@ -97,6 +97,57 @@ proc debugEnabled*(self: BleClient): bool =
   result = self.debug
 
 # ------------------------------------------------------------------------------
+# Close Mailbox Safely
+# ------------------------------------------------------------------------------
+proc safeClose[T](mbx: Mailbox[T]) =
+  if mbx.isNil:
+    return
+  try:
+    mbx.close()
+  except:
+    discard
+
+# ------------------------------------------------------------------------------
+# Close Internal Mailboxes
+# ------------------------------------------------------------------------------
+proc closeMailboxes(self: BleClient) =
+  self.cmdMbx.safeClose()
+  self.gattMbx.safeClose()
+  self.mainRespMbx.safeClose()
+  self.mainAdvMbx.safeClose()
+  self.mainEventMbx.safeClose()
+  self.appEventMbx.safeClose()
+  for mbx in self.tblGattMailboxes.values:
+    mbx.gattRespMbx.safeClose()
+    mbx.gattEventMbx.safeClose()
+    mbx.gattNotifyMbx.safeClose()
+
+# ------------------------------------------------------------------------------
+# API: Close
+# ------------------------------------------------------------------------------
+proc close*(self: BleClient) =
+  ## Stop background tasks and close the connection to btmd.
+  if self.isNil:
+    return
+  self.running = false
+  self.closeMailboxes()
+
+  if not self.sock.isNil:
+    try:
+      self.sock.close()
+    except:
+      discard
+
+  for client in self.gattClients.values:
+    client.connected = false
+    client.encrypted = false
+    if not client.encryptionWait.isNil and client.encryptionWait.locked:
+      try:
+        client.encryptionWait.release()
+      except:
+        discard
+
+# ------------------------------------------------------------------------------
 # Put to Response Mailbox
 # ------------------------------------------------------------------------------
 proc putResponse*(self: BleClient, opc: uint16, data: string): Future[bool] {.async.} =
@@ -246,43 +297,82 @@ proc gattNotifyHandler(self: BleClient, opc: uint16, response: string) {.async.}
     discard await mbx.gattNotifyMbx.put(event)
 
 # ------------------------------------------------------------------------------
+# Receive exact number of bytes from async socket
+# ------------------------------------------------------------------------------
+proc recvExact(sock: AsyncSocket, size: int): Future[Option[string]] {.async.} =
+  if size <= 0:
+    return some("")
+
+  var buf = newStringOfCap(size)
+  while buf.len < size:
+    let chunk = await sock.recv(size - buf.len)
+    if chunk.len == 0:
+      return none(string)
+    buf.add(chunk)
+
+  result = some(buf)
+
+# ------------------------------------------------------------------------------
 # BTM Task: Response Handler
 # ------------------------------------------------------------------------------
 proc responseHandler(self: BleClient) {.async.} =
-  while true:
-    let hdr = await self.sock.recv(2)
-    let pktlen = hdr.getLe16(0).int
-    let response = await self.sock.recv(pktlen)
-    if response.len < 3:
-      self.debugEcho("! responseHandler: ?????")
-      continue
-    let opc = response.getOpc()
-    let opcKind = opc.opc2kind()
-    case opcKind
-    of OpcKind.GapAdvertise:
-      self.debugEcho(" -> OPC_GAP_ADVERTISING")
-      discard await self.putAdvertising(opc, response)
-    of OpcKind.MainResponses:
-      self.debugEcho(" -> OPC_MAIN_RESPONSES")
-      discard await self.putResponse(opc, response)
-    of OpcKind.MainEvents:
-      self.debugEcho(" -> OPC_MAIN_EVENTS")
-      discard await self.putEvent(opc, response)
-    of OpcKind.GattClientConfirmations:
-      self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
-      await self.gattResponseHandler(opc, response)
-    of OpcKind.GattClientEvents:
-      self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
-      await self.gattEventHandler(opc, response)
-    of OpcKind.GattClientNotifications:
-      self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
-      await self.gattNotifyHandler(opc, response)
-    else:
-      self.debugEcho("OPC not found")
-      continue
-    if hasPendingOperations():
-      poll(1)
-    GC_fullCollect()
+  while self.running:
+    try:
+      let hdrOpt = await self.sock.recvExact(2)
+      if hdrOpt.isNone:
+        syslog.info("BTM socket closed while reading packet header.")
+        self.close()
+        break
+
+      let hdr = hdrOpt.get()
+      let pktlen = hdr.getLe16(0).int
+      if pktlen <= 0:
+        self.debugEcho("! responseHandler: empty packet")
+        continue
+
+      let responseOpt = await self.sock.recvExact(pktlen)
+      if responseOpt.isNone:
+        syslog.info("BTM socket closed while reading packet body.")
+        self.close()
+        break
+
+      let response = responseOpt.get()
+      if response.len < 3:
+        self.debugEcho("! responseHandler: ?????")
+        continue
+      let opc = response.getOpc()
+      let opcKind = opc.opc2kind()
+      case opcKind
+      of OpcKind.GapAdvertise:
+        self.debugEcho(" -> OPC_GAP_ADVERTISING")
+        discard await self.putAdvertising(opc, response)
+      of OpcKind.MainResponses:
+        self.debugEcho(" -> OPC_MAIN_RESPONSES")
+        discard await self.putResponse(opc, response)
+      of OpcKind.MainEvents:
+        self.debugEcho(" -> OPC_MAIN_EVENTS")
+        discard await self.putEvent(opc, response)
+      of OpcKind.GattClientConfirmations:
+        self.debugEcho(" -> OPC_GATT_CLIENT_CONFIRMATIONS")
+        await self.gattResponseHandler(opc, response)
+      of OpcKind.GattClientEvents:
+        self.debugEcho(" -> OPC_GATT_CLIENT_EVENTS")
+        await self.gattEventHandler(opc, response)
+      of OpcKind.GattClientNotifications:
+        self.debugEcho(" -> OPC_GATT_CLIENT_NOTIFY")
+        await self.gattNotifyHandler(opc, response)
+      else:
+        self.debugEcho("OPC not found")
+        continue
+      if hasPendingOperations():
+        poll(1)
+      GC_fullCollect()
+    except:
+      if self.running:
+        let err = getCurrentExceptionMsg()
+        syslog.error(&"! responseHandler: caught exception, {err}")
+        self.close()
+      break
 
 # ==============================================================================
 # BTM Task: Sender
@@ -291,39 +381,50 @@ proc taskSender(self: BleClient) {.async.} =
   var
     fut_cmd: Future[Result[string, ErrorCode]]
     fut_gatt: Future[Result[string, ErrorCode]]
-  while true:
-    var
-      payload: string
-      isCmd: bool = false
-      hdr: uint16
-    payload.setLen(0)
-    if fut_cmd.isNil:
-      fut_cmd = self.cmdMbx.receive()
-    if fut_gatt.isNil:
-      fut_gatt = self.gattMbx.receive()
-    await fut_cmd or fut_gatt
-    if fut_cmd.finished:
-      let payload_res = fut_cmd.read()
-      fut_cmd = nil
-      if payload_res.isOk:
-        payload = payload_res.get()
-        isCmd = true
-    if (not isCmd) and fut_gatt.finished:
-      let payload_res = fut_gatt.read()
-      fut_gatt = nil
-      if payload_res.isOk:
-        payload = payload_res.get()
-      else:
+  while self.running:
+    try:
+      var
+        payload: string
+        isCmd: bool = false
+        hdr: uint16
+      payload.setLen(0)
+      if fut_cmd.isNil:
+        fut_cmd = self.cmdMbx.receive()
+      if fut_gatt.isNil:
+        fut_gatt = self.gattMbx.receive()
+      await fut_cmd or fut_gatt
+      if fut_cmd.finished:
+        let payload_res = fut_cmd.read()
+        fut_cmd = nil
+        if payload_res.isOk:
+          payload = payload_res.get()
+          isCmd = true
+        elif payload_res.error == ErrorCode.Disconnected:
+          break
+      if (not isCmd) and fut_gatt.finished:
+        let payload_res = fut_gatt.read()
+        fut_gatt = nil
+        if payload_res.isOk:
+          payload = payload_res.get()
+        elif payload_res.error == ErrorCode.Disconnected:
+          break
+        else:
+          continue
+      if payload.len == 0:
+        # ???
         continue
-    if payload.len == 0:
-      # ???
-      continue
-    hdr = payload.len.uint16
-    await self.sock.send(addr hdr, hdr.sizeOf)
-    await self.sock.send(payload)
+      hdr = payload.len.uint16
+      await self.sock.send(addr hdr, hdr.sizeOf)
+      await self.sock.send(payload)
+    except:
+      if self.running:
+        let err = getCurrentExceptionMsg()
+        syslog.error(&"! taskSender: caught exception, {err}")
+        self.close()
+      break
 
 proc taskDummy(self: BleClient) {.async.} =
-  while true:
+  while self.running:
     await sleepAsync(10000)
 
 # ------------------------------------------------------------------------------
@@ -355,6 +456,7 @@ proc initBTM*(self: BleClient, path: string): Future[bool] {.async.} =
   try:
     self.sock = newAsyncSocket(AF_UNIX, SOCK_STREAM, IPPROTO_IP)
     await self.sock.connectUnix(path)
+    self.running = true
     await self.initTasks()
     result = true
   except:
@@ -371,6 +473,7 @@ proc initBTM*(self: BleClient, port: Port, host: string = "localhost"):
   try:
     self.sock = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_IP)
     await self.sock.connect(host, port)
+    self.running = true
     await self.initTasks()
     result = true
   except:

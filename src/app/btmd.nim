@@ -259,15 +259,39 @@ proc deInitBtm(self: BtmServer): bool {.used.} =
 # ------------------------------------------------------------------------------
 #
 # ------------------------------------------------------------------------------
+proc recvExact(sock: Socket, size: int): Option[string] =
+  if size <= 0:
+    return some("")
+
+  var buf = newStringOfCap(size)
+  while buf.len < size:
+    let chunk = sock.recv(size - buf.len)
+    if chunk.len == 0:
+      return none(string)
+    buf.add(chunk)
+
+  result = some(buf)
+
+# ------------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------------
 proc handleClientRecv(self: BtmServer) =
   while true:
-    let hdr = self.clientSock.recv(2)
-    if hdr.len == 0:
+    let hdrOpt = self.clientSock.recvExact(2)
+    if hdrOpt.isNone:
       break
+
+    let hdr = hdrOpt.get()
     let length = hdr.getLe16(0).int
-    let buf = self.clientSock.recv(length)
-    if buf.len == 0:
+    if length <= 0:
+      syslog.error("! handleClientRecv: empty packet received.")
+      continue
+
+    let bufOpt = self.clientSock.recvExact(length)
+    if bufOpt.isNone:
       break
+
+    let buf = bufOpt.get()
     discard btmSend(buf)
     if logCmdRecv:
       logCmdResponse(cmdRes = true, buf)
